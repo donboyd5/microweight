@@ -1,6 +1,6 @@
 
 # TODO ----
-# remove targets that are zero?
+# remove targets that are zero
 # AGI_STUB 1 is bad -- decide what to include
 # step 7 create new state weights
 # step 8 test results
