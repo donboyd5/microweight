@@ -115,8 +115,7 @@ shareslong %>%
 
 # SD 2 (9600) WV 3 (9600)
 shareslong %>%
-  filter(AGI_STUB==3, STATE=="WV")
-
+  filter(AGI_STUB==2, STATE=="MI")
 
 
 # worst 20 -- all are in incgroup 1
@@ -232,13 +231,13 @@ ustargtot[, vars] %>%
 possible_target_vars
 
 # minimalist
-def_targs <- c("N1_nnz", "MARS2_nnz",
-               "posAGI_nnz", "A00100_sum",
-               "N00200_nnz", "A00200_sum")
-ig1_targs <- c("N1_nnz", "MARS2_nnz",
-               "A00100_sum",
-               "N00200_nnz", "A00200_sum",
-               "N09600_nnz", "A09600_sum")
+# def_targs <- c("N1_nnz", "MARS2_nnz",
+#                "posAGI_nnz", "A00100_sum",
+#                "N00200_nnz", "A00200_sum")
+# ig1_targs <- c("N1_nnz", "MARS2_nnz",
+#                "A00100_sum",
+#                "N00200_nnz", "A00200_sum",
+#                "N09600_nnz", "A09600_sum")
 
 # best attempt
 def_targs <- c("N1_nnz", "MARS2_nnz",
@@ -257,19 +256,35 @@ ig1_targs <- c("N1_nnz", "MARS2_nnz",
                "N05800_nnz", "A05800_sum",
                "N09600_nnz", "A09600_sum")
 
-ri10_targs <- setdiff(def_targs, c("N17000_nnz", "A17000_sum"))
-(x9600_targs <- setdiff(def_targs, c("N09600_nnz", "A09600_sum")))
-
 # create lists of each kind of target
 targs_default <- list(def_targs)
 targs_ig1 <- list(ig1_targs)
-targs_ri10 <- list(ri10_targs)
-targs_x9600 <- list(x9600_targs)
 
 # data frame, each AGI_STUB has a vector of target vars
-target_vars_df <- expand_grid(STATE=unique(puf_targ$STATE), AGI_STUB=unique(puf_targ$AGI_STUB)) %>%
-  mutate(target_vec=case_when(AGI_STUB==1 ~ targs_ig1,
-                              TRUE ~ targs_default))
+# get bad targets
+targets_bad <- shareslong %>%
+  filter(is.na(target) | target==0) %>%
+  select(AGI_STUB, STATE, targname) %>%
+  group_by(AGI_STUB, STATE) %>%
+  summarise(badtargets=list(as.vector(targname)), .groups="drop")
+
+remove_bad <- function(badtargets) {
+  diff <- setdiff(unlist(targs_default), unlist(badtargets))
+  list(diff)
+  }
+target_vars_df <- expand_grid(STATE=unique(puf_targ$STATE),
+                              AGI_STUB=unique(puf_targ$AGI_STUB)) %>%
+  left_join(targets_bad, by = c("STATE", "AGI_STUB")) %>%
+  rowwise() %>%
+  mutate(target_vec=case_when(AGI_STUB == 1 ~ targs_ig1,
+                              STATE == "OA" ~ targs_ig1,
+                              TRUE ~ remove_bad(badtargets)))
+target_vars_df %>% filter(STATE=="OA")
+
+# target_vars_df <- expand_grid(STATE=unique(puf_targ$STATE),
+#                               AGI_STUB=unique(puf_targ$AGI_STUB)) %>%
+#   mutate(target_vec=case_when(AGI_STUB==1 ~ targs_ig1,
+#                               TRUE ~ targs_default))
 
 
 # 5. prepare initial state weights one at a time ----
@@ -282,14 +297,23 @@ target_vars_df <- expand_grid(STATE=unique(puf_targ$STATE), AGI_STUB=unique(puf_
 #.. 5-a Loop through a set of states ----
 
 #.... test the one_state function ----
-st <- "WY"; ig <- 10 # NH MS RI
+# OA 1 RI 1 DC 1 OA 5 AL 2 NY 1 WY 2
+st <- "WY"; ig <- 2 # NH MS RI
 st <- "SD"; ig <- 2 #
 st <- "WV"; ig <- 3 #
+st <- "OA"; ig <- 5 #
+st <- "NY"; ig <- 1 #
 # # SD 2 (9600) WV 3 (9600)
 tvdf2 <- target_vars_df %>%
-  mutate(target_vec=ifelse(STATE==st & AGI_STUB==ig, targs_x9600, target_vec))
+  mutate(target_vec=ifelse(STATE==st & AGI_STUB==ig, targs_ig1, list(target_vec)))
+tvdf2 %>% filter(STATE==st & AGI_STUB==ig)
 
 res <- one_state(st=st, incgroup=ig, target_vars_df=tvdf2, quiet=FALSE)
+
+
+# res <- one_state(st=st, incgroup=ig, target_vars_df=target_vars_df, quiet=FALSE)
+# res <- one_state(st=st, incgroup=ig, target_vars_df=tvdf2, method='Newton', quiet=FALSE)
+
 # res <- one_state(st=st, incgroup=ig, target_vars_df=tvdf2, method='Broyden', quiet=FALSE)
 res$h; res$s; res$k
 res$etime
@@ -332,8 +356,8 @@ a <- proc.time()
 res_df <- puf_targ %>%
   select(AGI_STUB, STATE) %>%
   # filter(AGI_STUB %in% 2:3, STATE %in% c("AL", "CA", "IL")) %>%
-  # filter(AGI_STUB == 2) %>%
-  # filter(AGI_STUB %in% 1) %>%
+  # filter(AGI_STUB == 1) %>%
+  filter(STATE == "OA") %>%
   group_by(AGI_STUB, STATE) %>%
   nest()  %>%
   {if (parallel) partition(., cluster) else .} %>%
@@ -343,10 +367,10 @@ res_df <- puf_targ %>%
   arrange(AGI_STUB, STATE) # must sort if parallel
 b <- proc.time()
 b - a # seconds
-(b - a) / 60 # minutes
+(b - a) / 60 # minutes 69 minutes
 
 # save results as the above can take a long time to run
-# saveRDS(res_df, here::here("ignore", "res_df.rds"))
+# system.time(saveRDS(res_df, here::here("ignore", "res_df.rds"))) # 33 secs
 # res_df <- readRDS(here::here("ignore", "res_df.rds"))
 
 names(res_df$res[[1]])
@@ -368,8 +392,14 @@ tmp %>%
 quantile(tmp$sse_weighted, na.rm=TRUE)
 
 tmp %>% filter(AGI_STUB==10, STATE=="RI")
+
 tmp %>%
   arrange(-sse_weighted)
+
+rec <- res_df %>%
+  filter(AGI_STUB==2, STATE=="OA") %>%
+  .$res
+rec[[1]]$targets_pctdiff %>% round(2)
 
 #.. 5-b retrieve state weights and examine puf ----
 # res_df %>%

@@ -133,6 +133,7 @@ geoweight <- function(wh, xmat, targets, dweights = get_dweights(targets),
     } else if (method == "Newton") {
       opts_Newton <- purrr::list_modify(opts_Newton, !!!opts) # splice lists
       if(!is.null(maxiter)) opts_Newton$maxit <- maxiter
+      print("calling...")
       output <- nleqslv::nleqslv(x = betavec, fn = diff_vec, jac = NULL,
                                  wh = wh, xmat = xmat, targets = targets,
                                  dweights = dweights,
@@ -142,7 +143,6 @@ geoweight <- function(wh, xmat, targets, dweights = get_dweights(targets),
                                  control = opts_Newton)
       beta_opt <- output$x
       opts_used <- opts_Newton
-
     }
   t2 <- proc.time()
 
