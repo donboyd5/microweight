@@ -1,0 +1,58 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+```
+
+# microweight
+
+<!-- badges: start -->
+<!-- badges: end -->
+
+`microweight` provides tools for weighting microdata files.
+
+The function `geoweight` allows users to split record weights of microdata files across different geographic areas in a manner that hits or comes close to target values for those areas.
+
+Other functions allow users to reweight a file to hit or come close to targets.
+
+The motivation for `geoweight` was the desire to distribute the individual record weights for an anonymized national sample of tax returns across the 50 states in a manner that is consistent with published totals for the states. A portion of each record weight is shared to each of the 50 states, so that the sum of the 50 states adds to the total record weight, for each record. The methods and functions used by this package can be used for other purposes.
+
+The primary approach in `geoweight` is a variant of the method described in:
+
+> Khitatrakun, Surachai, Gordon B T Mermin, and Norton Francis. “Incorporating
+  State Analysis into the Tax Policy Center’s Microsimulation Model: 
+  Documentation and Methodology.” [Working Paper, March 2016.](https://www.taxpolicycenter.org/sites/default/files/alfresco/publication-pdfs/2000697-Incorporating-State-Analysis-into-the-TPCs-Microsimulation-Model.pdf)
+
+
+## Installation
+
+You will be able to install the released version of microweight, when it is released, from [CRAN](https://CRAN.R-project.org) with:
+
+``` r
+install.packages("microweight")
+```
+
+Currently you can install the development version from [GitHub](https://github.com/) with:
+
+``` r
+# install.packages("devtools")
+devtools::install_github("donboyd5/microweight")
+```
+## Example
+
+This is a basic example which shows you how to solve a common problem:
+
+```{r example}
+library(microweight)
+## basic example code
+```
+

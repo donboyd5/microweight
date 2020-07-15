@@ -1,0 +1,28 @@
+Package: microweight
+Type: Package
+Title: Tools for Weighting Microdata Files
+Version: 0.1.0
+Author: person("Don", "Boyd", , "donboyd5@gmail.com", role = c("aut", "cre"))
+Maintainer: Don Boyd <donboyd5@gmail.com>
+Description: Tools for splitting record weights for a microdata file across states or 
+    other geographies in a manner that hits or comes close to targets for those geographies, 
+    for reweighting microdata files, and for other weighting tasks.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Imports: 
+    dplyr,
+    magrittr,
+    minpack.lm,
+    nleqslv,
+    purrr,
+    rlang,
+    stats,
+    tibble,
+    tidyr
+RoxygenNote: 7.1.1
+Depends: 
+    R (>= 2.10)
+Roxygen: list(markdown = TRUE)
+Suggests: 
+    ipoptr
