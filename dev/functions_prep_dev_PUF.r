@@ -308,7 +308,7 @@ get_conbounds <- function(.constraints, .n_targets, .targtol=.01){
   list(clb=clb, cub=cub)
 }
 
-.incgroup_data <- incgroup_data; .target_vars <- target_vars; .iweights <- iweights; .targets_df <- targets_df; .cc_sparse <- cc_sparse
+# .incgroup_data <- incgroup_data; .target_vars <- target_vars; .iweights <- iweights; .targets_df <- targets_df; .cc_sparse <- cc_sparse
 
 get_inputs <- function(.targets_df, .iweights, .cc_sparse, .objscale=1, .p=2, .targtol=.01, .xub=20, .conscaling=FALSE, scale_goal=1){
   inputs_unscaled <- list()
@@ -325,7 +325,7 @@ get_inputs <- function(.targets_df, .iweights, .cc_sparse, .objscale=1, .p=2, .t
                                       distinct)
   inputs_unscaled$objscale <- .objscale
 
-  conbounds <- get_conbounds(.constraints=inputs_unscaled$constraints, .n_targets=inputs_unscaled$n_targets, .targtol=.01)
+  conbounds <- get_conbounds(.constraints=inputs_unscaled$constraints, .n_targets=inputs_unscaled$n_targets, .targtol=.targtol)
   inputs_unscaled$clb <- conbounds$clb
   inputs_unscaled$cub <- conbounds$cub
 
@@ -341,4 +341,7 @@ get_inputs <- function(.targets_df, .iweights, .cc_sparse, .objscale=1, .p=2, .t
 
   inputs
 }
+
+
+
 
