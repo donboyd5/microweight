@@ -190,3 +190,86 @@ scale_inputs <- function(inputs, scale_goal=1){
   return(inputs_scaled)
 }
 
+
+stub_opt <- function(stub){
+  # reweight nationally for a single stub
+  print(paste0("Reweighting for AGI_STUB: ", stub)) # won't print if parallel
+
+  a <- proc.time()
+
+  targs_stub <- ustargs %>%
+    filter(AGI_STUB == stub) %>%
+    pivot_longer(-AGI_STUB, names_to = "cname", values_to = "value") %>%
+    filter(!is.na(value))
+
+  # CAUTION: in parallel we cannot (??) use row_number to create an index
+  # so I do it in a second step - do not combine into a single step!
+  targs_stub <- targs_stub %>%
+    mutate(i = 1:nrow(targs_stub))
+
+  targ_names <- targs_stub$cname
+
+  iweights_stub <- wts_all %>%
+    filter(AGI_STUB == stub) %>%
+    select(AGI_STUB, sortid, iweight=wh_sum)
+
+  data_stub <- pufstrip %>%
+    filter(AGI_STUB == stub) %>%
+    select(AGI_STUB, sortid, all_of(targ_names))
+
+  cc_sparse <- get_cc_national(.incgroup_data = data_stub,
+                               .target_vars = targ_names,
+                               .iweights = iweights_stub,
+                               .targets_df = targs_stub)
+
+  inputs <- get_inputs_national(.targets_df = targs_stub,
+                                .iweights = iweights_stub,
+                                .cc_sparse = cc_sparse,
+                                .targtol=.001,
+                                .xub=20,
+                                .conscaling=FALSE,
+                                scale_goal=1)
+
+  # saveRDS(inputs, here::here("inputs.rds"))
+
+  opts <- list("print_level" = 0,
+               "file_print_level" = 5, # integer
+               "max_iter"= 30,
+               "linear_solver" = "ma57", # mumps pardiso ma27 ma57 ma77 ma86 ma97
+               # "mehrotra_algorithm" = "yes",
+               #"obj_scaling_factor" = 1, # 1e-3, # default 1; 1e-1 pretty fast to feasible but not to optimal
+               "jac_c_constant" = "yes", # does not improve on moderate problems equality constraints
+               "jac_d_constant" = "yes", # does not improve on  moderate problems inequality constraints
+               "hessian_constant" = "yes", # KEEP default NO - if yes Ipopt asks for Hessian of Lagrangian function only once and reuses; default "no"
+               # "hessian_approximation" = "limited-memory", # KEEP default of exact
+               "output_file" = here::here("ignore", paste0("stub", stub, ".out")))
+
+  result <- ipoptr(x0 = inputs$x0,
+                   lb = inputs$xlb,
+                   ub = inputs$xub,
+                   eval_f = eval_f_xm1sq, # arguments: x, inputs; eval_f_xtop eval_f_xm1sq
+                   eval_grad_f = eval_grad_f_xm1sq, # eval_grad_f_xtop eval_grad_f_xm1sq
+                   eval_g = eval_g, # constraints LHS - a vector of values
+                   eval_jac_g = eval_jac_g,
+                   eval_jac_g_structure = inputs$eval_jac_g_structure,
+                   eval_h = eval_h_xm1sq, # the hessian is essential for this problem eval_h_xtop eval_h_xm1sq
+                   eval_h_structure = inputs$eval_h_structure,
+                   constraint_lb = inputs$clb,
+                   constraint_ub = inputs$cub,
+                   opts = opts,
+                   inputs = inputs)
+
+  b <- proc.time()
+
+
+  output <- list()
+  output$solver_message <- result$message
+  output$etime <- b - a
+  output$weights_df <- iweights_stub %>%
+    mutate(x=result$solution,
+           wh_adj = iweight * x)
+  output$result <- result
+
+  output
+}
+

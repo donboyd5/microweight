@@ -379,7 +379,7 @@ b - a # seconds
 (b - a) / 60 # minutes 69 minutes
 
 # save results as the above can take a long time to run
-system.time(saveRDS(res_df, here::here("ignore", "res_df.rds"))) # 33 secs
+# system.time(saveRDS(res_df, here::here("ignore", "res_df.rds"))) # 33 secs
 # res_df <- readRDS(here::here("ignore", "res_df.rds"))
 
 names(res_df$res[[1]])
@@ -418,9 +418,9 @@ rec[[1]]$targets_pctdiff %>% round(2)
 #   unnest_longer(bvl) %>%
 #   select(AGI_STUB, STATE, bvl)
 
-iglook <- 10
+# iglook <- 10
 
-#.. retrieve original national weights, one set per AGI_STUB ----
+#.. retrieve original national weights, one set per AGI_STUB
 wts_wh <- res_df %>%
   select(AGI_STUB, res) %>%
   group_by(AGI_STUB) %>%
@@ -434,7 +434,7 @@ wts_wh %>%
   group_by(AGI_STUB) %>%
   slice_head(n=4)
 
-#.. retrieve initial state weights ----
+#.. retrieve initial state weights
 # res_df$res[[1]]$whs[1:10, ] # examine the whs matrix; AGI_STUB 1 is bad
 wts_whs <- res_df %>%
   unnest_wider(res) %>%
@@ -443,7 +443,7 @@ wts_whs <- res_df %>%
   unnest(c(sortid, whs)) %>%
   pivot_wider(names_from = STATE, values_from=whs)
 
-#.. combine weights and calculate new national weight as sum of state weights ----
+#.. combine weights and calculate new national weight as sum of state weights
 wts_all <- wts_wh %>%
   left_join(wts_whs, by = c("AGI_STUB", "sortid")) %>%
   mutate(wh_sum=rowSums(across(-c(AGI_STUB, sortid, wh)))) %>%
@@ -513,89 +513,6 @@ ustargs <- puf_targ %>%
   summarise(across(.fns=sum), .groups="drop")
 ustargs
 
-stub <- 1
-
-stub_opt <- function(stub){
-  print(paste0("Reweighting for AGI_STUB: ", stub)) # won't print if parallel
-
-  a <- proc.time()
-
-  targs_stub <- ustargs %>%
-    filter(AGI_STUB == stub) %>%
-    pivot_longer(-AGI_STUB, names_to = "cname", values_to = "value") %>%
-    filter(!is.na(value))
-
-  # CAUTION: in parallel we cannot (??) use row_number to create an index
-  # so I do it in a second step - do not combine into a single step!
-  targs_stub <- targs_stub %>%
-    mutate(i = 1:nrow(targs_stub))
-
-  targ_names <- targs_stub$cname
-
-  iweights_stub <- wts_all %>%
-    filter(AGI_STUB == stub) %>%
-    select(AGI_STUB, sortid, iweight=wh_sum)
-
-  data_stub <- pufstrip %>%
-    filter(AGI_STUB == stub) %>%
-    select(AGI_STUB, sortid, all_of(targ_names))
-
-  cc_sparse <- get_cc_national(.incgroup_data = data_stub,
-                               .target_vars = targ_names,
-                               .iweights = iweights_stub,
-                               .targets_df = targs_stub)
-
-  inputs <- get_inputs_national(.targets_df = targs_stub,
-                                .iweights = iweights_stub,
-                                .cc_sparse = cc_sparse,
-                                .targtol=.001,
-                                .xub=20,
-                                .conscaling=FALSE,
-                                scale_goal=1)
-
-  # saveRDS(inputs, here::here("inputs.rds"))
-
-  opts <- list("print_level" = 0,
-               "file_print_level" = 5, # integer
-               "max_iter"= 30,
-               "linear_solver" = "ma57", # mumps pardiso ma27 ma57 ma77 ma86 ma97
-               # "mehrotra_algorithm" = "yes",
-               #"obj_scaling_factor" = 1, # 1e-3, # default 1; 1e-1 pretty fast to feasible but not to optimal
-               "jac_c_constant" = "yes", # does not improve on moderate problems equality constraints
-               "jac_d_constant" = "yes", # does not improve on  moderate problems inequality constraints
-               "hessian_constant" = "yes", # KEEP default NO - if yes Ipopt asks for Hessian of Lagrangian function only once and reuses; default "no"
-               # "hessian_approximation" = "limited-memory", # KEEP default of exact
-               "output_file" = here::here("ignore", paste0("stub", stub, ".out")))
-
-  result <- ipoptr(x0 = inputs$x0,
-                   lb = inputs$xlb,
-                   ub = inputs$xub,
-                   eval_f = eval_f_xm1sq, # arguments: x, inputs; eval_f_xtop eval_f_xm1sq
-                   eval_grad_f = eval_grad_f_xm1sq, # eval_grad_f_xtop eval_grad_f_xm1sq
-                   eval_g = eval_g, # constraints LHS - a vector of values
-                   eval_jac_g = eval_jac_g,
-                   eval_jac_g_structure = inputs$eval_jac_g_structure,
-                   eval_h = eval_h_xm1sq, # the hessian is essential for this problem eval_h_xtop eval_h_xm1sq
-                   eval_h_structure = inputs$eval_h_structure,
-                   constraint_lb = inputs$clb,
-                   constraint_ub = inputs$cub,
-                   opts = opts,
-                   inputs = inputs)
-
-  b <- proc.time()
-
-
-  output <- list()
-  output$solver_message <- result$message
-  output$etime <- b - a
-  output$weights_df <- iweights_stub %>%
-    mutate(x=result$solution,
-           whs_adj = iweight * x)
-  output$result <- result
-
-  output
-}
-
 #.. test the function ----
 d <- stub_opt(1)
 d$solver_message
@@ -635,55 +552,85 @@ b <- proc.time()
 b - a # seconds
 (b - a) / 60 # minutes 69 minutes
 
+# saveRDS(opt_df, here::here("ignore", "opt_df.rds"))
+# opt_df <- readRDS(here::here("ignore", "opt_df.rds"))
+
 
 names(opt_df$output[[1]])
 
 tmp <- opt_df %>%
-  ungroup %>%
   hoist(output, "solver_message")
 tmp
 
 # rlang::last_error()
 # rlang::last_trace()
 
-# length(x$eval_g(x$x0)) == num.constraints is not TRUE
-check <- readRDS("inputs.rds")
-names(check)
-check$targs_stub
-check$iweight # 6024
-check$x0
-eval_g(check$x0, inputs=check)
-length(check$constraints); length(check$clb); length(check$cub)
-check$n_constraints
-
-
-count(check$cc_sparse, i, cname)
-nrow(count(check$cc_sparse, j))
-
-check$cc_sparse %>%
-  group_by(i) %>%
-  summarise(constraint_value=sum(nzcc * x[j]),
-            .groups="keep")
-
-check$eval_jac_g_structure
-check$eval_h_structure
-
 
 # 7. calculate adjusted state weights that hit the adjusted national total ----
 
+# mutate(whs=map(whs, function(mat) mat[, 1])) %>% # get whs vector for each state
+# wts_whs <- res_df %>%
+#   unnest_wider(res) %>%
+#   select(AGI_STUB, STATE, sortid, whs) %>%
+#   mutate(whs=map(whs, function(mat) mat[, 1])) %>% # get whs vector for each state
+#   unnest(c(sortid, whs)) %>%
+#   pivot_wider(names_from = STATE, values_from=whs)
 
-iweights2 <- iweights %>%
-  mutate(x=result$solution,
-         wh_sumadj=iweight * x)
+names(opt_df$output[[1]])
+# opt_df$output[[1]]$weights_df # AGI_STUB sortid iweight     x whs_adj
+wts_adj <- opt_df %>%
+  hoist(output, "weights_df") %>%
+  select(AGI_STUB, weights_df) %>%
+  group_by(AGI_STUB) %>%
+  mutate(weights_df=map(weights_df, function(x) x %>% select(-AGI_STUB))) %>%
+  unnest(col=weights_df) %>%
+  ungroup %>%
+  left_join(wts_all, by = c("AGI_STUB", "sortid")) %>%
+  mutate(across(-c(AGI_STUB, sortid, iweight, x, wh_adj, wh, wh_sum),
+                function(wt) wt * x)) %>%
+  mutate(wh_adjsum=rowSums(across(-c(AGI_STUB, sortid, iweight, x, wh_adj, wh, wh_sum)))) %>%
+  select(AGI_STUB, sortid, iweight, x, starts_with("wh"), everything())
 
-iweights2 %>% arrange(-x)
+
+calc_targ_adj <- calc_targets(wtsdf=wts_adj, pufdf=pufstrip)
+
+
+target_comp_adj <- bind_rows(puf_targ %>% mutate(type="target"),
+                             calc_targ_adj %>% mutate(type="calc")) %>%
+  pivot_longer(cols=-c(AGI_STUB, STATE, type),
+               names_to = "targname") %>%
+  pivot_wider(names_from=type) %>%
+  mutate(diff=calc - target,
+         pdiff=diff / target * 100) %>%
+  left_join(target_vars_df %>%
+              select(AGI_STUB, STATE, targname=target_vec) %>%
+              unnest(targname) %>%
+              mutate(targeted=TRUE),
+            by = c("AGI_STUB", "STATE", "targname")) %>%
+  mutate(targeted=ifelse(is.na(targeted), FALSE, TRUE))
+
+target_comp_adj %>%
+  filter(STATE=="CT") %>%
+  arrange(-abs(pdiff))
+
+target_comp %>%
+  filter(STATE=="CT") %>%
+  arrange(-abs(pdiff))
+
+target_comp_adj %>%
+  filter(STATE=="NY", AGI_STUB==10) %>%
+  arrange(-abs(pdiff))
+
+target_comp %>%
+  filter(STATE=="NY", AGI_STUB==10) %>%
+  arrange(-abs(pdiff))
 
 wts_all_natladj <- wts_all %>%
   left_join(iweights2 %>% select(sortid, wh_sumadj), by = "sortid") %>%
   select(AGI_STUB, sortid, wh, wh_sum, wh_sumadj, everything())
 
 
-# 7. construct final state weights ----
+# 8. construct final state weights ----
 #.. 7-a use poisson method ----
 # targets
 # grab the targets for this STATE-AGI_STUB combination
