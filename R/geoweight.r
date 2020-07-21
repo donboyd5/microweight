@@ -39,6 +39,8 @@
 #'   \item{whs}{h x s matrix of state weights for each household, computed
 #'     using the optimal parameters}
 #'   \item{wh}{the input vector of household total weights, length h}
+#'   \item{xmat}{matrix of data for households, h x k}
+#'   \item{dweights}{optional vector of weighting factors for targets, length s * k}
 #'   \item{output}{list of output from the solver that was used}
 #' }
 #' @examples
@@ -168,7 +170,7 @@ geoweight <- function(wh, xmat, targets, dweights = get_dweights(targets),
                  "sse_unweighted", "sse_weighted",
                  "beta_opt_mat",
                  "targets", "targets_calc", "targets_diff", "targets_pctdiff",
-                 "whs", "wh", "output")
+                 "whs", "wh", "xmat", "dweights", "output")
   result <- list()
   for(var in keepnames) result[[var]] <- get(var)
 

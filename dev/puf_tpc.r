@@ -73,7 +73,7 @@ ht(puf_targ)
 setdiff(desired_target_vars, available_target_vars)
 setdiff(available_target_vars, desired_target_vars)
 
-#.. 1-a. check the targets ----
+#.. check the targets ----
 # get US totals for each income range and in total, for each target
 count(puf_targ, STATE)
 ustargtot <- puf_targ %>%
@@ -253,12 +253,69 @@ default_targets <- c("N1_nnz", "MARS2_nnz",
                "N09600_nnz", "A09600_sum",
                "N17000_nnz", "A17000_sum")
 
+# drop the 5800 and 9600 targets as they give a LOT of problems
+default_targets <- c("N1_nnz", "MARS2_nnz",
+                     "posAGI_nnz", "A00100_sum",
+                     "N00200_nnz", "A00200_sum",
+                     "N00700_nnz", "A00700_sum",
+                     "N01000_nnz", "A01000_sum",
+                     "N04470_nnz", "A04470_sum",
+                     "N04800_nnz", "A04800_sum",
+                     "N17000_nnz", "A17000_sum")
+
+
 # basic targets for income group 1 and for OA
-basic_targets <- c("N1_nnz", "MARS2_nnz",
-                       "A00100_sum",
-                       "N00200_nnz", "A00200_sum",
-                       "N05800_nnz", "A05800_sum",
-                       "N09600_nnz", "A09600_sum")
+# basic_targets <- c("N1_nnz", "MARS2_nnz",
+#                        "A00100_sum",
+#                        "N00200_nnz", "A00200_sum",
+#                        "N05800_nnz", "A05800_sum",
+#                        "N09600_nnz", "A09600_sum")
+
+
+#.. adjust targets to get rid of zero and NA values ----
+# calculate an adjusted target for any zero or NA target so that its per-return
+# value is equal to 50% of the lowest nonzero per-return value for other states for that target
+# N1_nnz is the return variable
+target_vars <- default_targets
+
+good_values <- puf_targ %>%
+  select(AGI_STUB, STATE, all_of(target_vars)) %>%
+  pivot_longer(-c(AGI_STUB, STATE, N1_nnz)) %>%
+  group_by(AGI_STUB, name) %>%
+  mutate(allbad=sum(is.na(value))==length(name)) %>%
+  ungroup %>%
+  filter(!allbad)
+# %>% filter(AGI_STUB==1, name=="A17000_sum")filter(AGI_STUB==1, name=="A17000_sum")
+# now do per-return adjustments
+fraction_of_lowest <- .5
+good_values_adj = good_values %>%
+  group_by(AGI_STUB, name) %>%
+  mutate(per_return=value / N1_nnz,
+         isgood=!is.na(per_return) & per_return!=0,
+         abs_per_return=ifelse(isgood, abs(per_return), NA),
+         min_isgood=min(abs_per_return, na.rm=TRUE),
+         whichmin=which.min(abs_per_return),
+         min_nzval_per_ret=min_isgood * sign(value[whichmin]),
+         value_adj=ifelse(is.na(value) | value==0,
+                          N1_nnz * min_nzval_per_ret * fraction_of_lowest,
+                          value)) %>%
+  ungroup
+
+good_values_adj %>%
+  filter(is.na(value) | value==0) %>%
+  arrange(AGI_STUB, name, STATE)
+
+
+good_values_adj %>%
+  filter(value != value_adj)
+
+targets_adj <- good_values_adj %>%
+  select(AGI_STUB, STATE, N1_nnz, name, value_adj) %>%
+  pivot_wider(values_from = value_adj) %>%
+  select(AGI_STUB, STATE, all_of(target_vars)) # ensure that columns are in the original order
+
+targets_adj %>% filter(AGI_STUB==10)
+
 
 # create lists of each kind of target
 # targs_default <- list(default_targets)
@@ -266,64 +323,60 @@ basic_targets <- c("N1_nnz", "MARS2_nnz",
 
 # data frame, each AGI_STUB has a vector of target vars
 # get bad targets
-targets_bad <- shareslong %>%
-  filter(is.na(target) | target==0) %>%
-  select(AGI_STUB, STATE, targname) %>%
-  group_by(AGI_STUB, STATE) %>%
-  summarise(badtargets=list(as.vector(targname)), .groups="drop")
 
-remove_bad <- function(target_vec, badtargets) {
-  diff <- setdiff(unlist(target_vec), unlist(badtargets))
-  list(diff)
-  }
 target_vars_df <- expand_grid(STATE=unique(puf_targ$STATE),
                               AGI_STUB=unique(puf_targ$AGI_STUB)) %>%
-  left_join(targets_bad, by = c("STATE", "AGI_STUB")) %>%
-  rowwise() %>%
-  mutate(target_vec=case_when(AGI_STUB == 1 ~ list(basic_targets),
-                              STATE == "OA" ~ list(basic_targets),
-                              TRUE ~ list(default_targets)),
-         target_vec=remove_bad(target_vec, badtargets))
-target_vars_df %>% filter(STATE=="OA")
+  left_join(targets_adj, by = c("STATE", "AGI_STUB")) %>%
+  pivot_longer(-c(STATE, AGI_STUB)) %>%
+  filter(!is.na(value)) %>%
+  group_by(STATE, AGI_STUB) %>%
+  summarise(target_vec=list(name), .groups="drop")
 
-df <- target_vars_df %>% filter(STATE=="OA", AGI_STUB==1)
-basic_targets
-df$badtargets[[1]]
+df <- target_vars_df %>% filter(STATE=="NY", AGI_STUB==2)
 df$target_vec[[1]]
 
 
-# 5. prepare initial state weights one at a time ----
+# 5. prepare initial state weights one state at a time ----
 # I found in prior investigation that LM is the best method
 # notes on parallel:
 # https://jennybc.github.io/purrr-tutorial/ls03_map-function-syntax.html
 # https://cfss.uchicago.edu/notes/split-apply-combine/
 
-#.. 5-a Loop through a set of states ----
-
-#.... test the one_state function ----
+#.. test results for a single state and income group ----
 # OA 1 RI 1 DC 1 OA 5 AL 2 NY 1 WY 2
 st <- "WY"; ig <- 2 # NH MS RI
 st <- "SD"; ig <- 2 #
 st <- "WV"; ig <- 3 #
 st <- "OA"; ig <- 5 #
 st <- "NY"; ig <- 1 #
+st <- "KY"; ig <- 10 #
 
 df <- target_vars_df %>% filter(STATE==st, AGI_STUB==ig)
-basic_targets
-df$badtargets[[1]]
 df$target_vec[[1]]
 
 # # SD 2 (9600) WV 3 (9600)
-tvdf2 <- target_vars_df %>%
-  mutate(target_vec=ifelse(STATE==st & AGI_STUB==ig, targs_ig1, list(target_vec)))
-tvdf2 %>% filter(STATE==st & AGI_STUB==ig)
-tvdf2 <- target_vars_df
+# tvdf2 <- target_vars_df %>%
+#   mutate(target_vec=ifelse(STATE==st & AGI_STUB==ig,
+#                            list(setdiff(target_vec, "posAGI_nnz")),
+#                            target_vec))
+# tvdf2 %>% filter(STATE==st & AGI_STUB==ig)
+# tvdf2 <- target_vars_df
 
-res <- one_state(st=st, incgroup=ig, target_vars_df=tvdf2, quiet=FALSE)
+good_values_adj %>%
+  filter(AGI_STUB==ig, STATE==st)
+
+tvdf2 <- df %>%
+  mutate(target_vec=list(setdiff(target_vec[[1]], c("posAGI_nnz", "N17000_nnz", "A17000_sum"))))
+tvdf2 <- df %>%
+  mutate(target_vec=list(setdiff(target_vec[[1]], c("posAGI_nnz"))))
+tvdf2$target_vec[[1]]
+
+res <- one_state(st=st, incgroup=ig, target_vars_df=tvdf2, quiet=FALSE, maxiter=50)
 
 # res <- one_state(st=st, incgroup=ig, target_vars_df=tvdf2, method='Newton', quiet=FALSE)
 # res <- one_state(st=st, incgroup=ig, target_vars_df=tvdf2, method='Broyden', quiet=FALSE)
 
+names(res)
 res$h; res$s; res$k
 res$etime
 res$solver_message
@@ -335,19 +388,37 @@ res$sse_weighted
 # res$targets_pctdiff %>% round(2)
 # cbind(res$sortid, res$wh)
 
-comp <- bind_rows(as_tibble(res$targets, rownames = "stabbr") %>%
-                    mutate(type="target"),
-                  as_tibble(res$targets_calc, rownames = "stabbr") %>%
-                    mutate(type="calc")) %>%
-  pivot_longer(-c(stabbr, type)) %>%
-  pivot_wider(names_from = type) %>%
-  mutate(diff=calc - target,
-         pdiff=diff / target * 100)
-comp %>% filter(stabbr != 'ZZ') %>%
-  kable(digits=c(0, 0, 0, 0, 0, 1), format.args=list(big.mark = ','))
+# calc vs ALL targets
+res$whs
+comp <- pufstrip %>%
+  filter(AGI_STUB==ig) %>%
+  left_join(tibble(STATE=st, sortid=res$sortid, whs=res$whs[, 1]),
+            by=c("sortid")) %>%
+  pivot_longer(-c(sortid, AGI_STUB, STATE, s006, whs)) %>%
+  mutate(calc=whs * value) %>%
+  group_by(AGI_STUB, STATE, name) %>%
+  summarise(calc=sum(calc, na.rm=TRUE), .groups="drop") %>%
+  left_join(puf_targ %>%
+              filter(AGI_STUB==ig, STATE==st) %>%
+              pivot_longer(-c(AGI_STUB, STATE),
+                           values_to="target"),
+            by = c("AGI_STUB", "STATE", "name")) %>%
+  left_join(good_values_adj %>%
+              select(AGI_STUB, STATE, name, target_adj=value_adj),
+            by = c("AGI_STUB", "STATE", "name")) %>%
+  select(AGI_STUB, STATE, name, target, target_adj, calc) %>%
+  mutate(target_adj=ifelse(is.na(target_adj), target, target_adj),
+         diff=calc - target,
+         pdiff=diff / target * 100,
+         diff_adj = calc - target_adj,
+         pdiff_adj = diff_adj / target_adj * 100,
+         targeted=name %in% tvdf2$target_vec[[1]]) %>%
+  arrange(-targeted, -abs(pdiff_adj))
+comp
 
 
-#.... loop ----
+
+#.. loop through many states and income ranges ----
 cluster <- new_cluster(6)
 
 # CAUTION: unfortunately no progress reporting when run in parallel
@@ -356,7 +427,7 @@ parallel <- TRUE
 
 if(parallel){
   # set the latest versions of functions, etc. up for the run
-  cluster_copy(cluster, c('one_state', 'puf_targ',
+  cluster_copy(cluster, c('one_state', 'check_xmat', 'puf_targ',
                           'pufstrip', 'target_vars_df')) # functions and data not in a library
   cluster_library(cluster, c("dplyr", "microweight", "tidyr", "purrr"))
 }
@@ -376,11 +447,11 @@ res_df <- puf_targ %>%
   arrange(AGI_STUB, STATE) # must sort if parallel
 b <- proc.time()
 b - a # seconds
-(b - a) / 60 # minutes 69 minutes
+(b - a) / 60 # minutes 35 minutes
 
 # save results as the above can take a long time to run
-# system.time(saveRDS(res_df, here::here("ignore", "res_df.rds"))) # 33 secs
-# res_df <- readRDS(here::here("ignore", "res_df.rds"))
+# system.time(saveRDS(res_df, here::here("ignore", "single_states.rds"))) # 33 secs
+# res_df <- readRDS(here::here("ignore", "single_states.rds"))
 
 names(res_df$res[[1]])
 
@@ -406,21 +477,12 @@ tmp %>%
   arrange(-sse_weighted)
 
 rec <- res_df %>%
-  filter(AGI_STUB==2, STATE=="OA") %>%
+  filter(AGI_STUB==10, STATE=="KY") %>%
   .$res
 rec[[1]]$targets_pctdiff %>% round(2)
 
 
-#.. 5-b retrieve state weights and examine puf ----
-# res_df %>%
-#   unnest_wider(res) %>%
-#   mutate(bvl=map(beta_opt_mat, as.vector)) %>%
-#   unnest_longer(bvl) %>%
-#   select(AGI_STUB, STATE, bvl)
-
-# iglook <- 10
-
-#.. retrieve original national weights, one set per AGI_STUB
+#.. retrieve original national weights, one set per AGI_STUB ----
 wts_wh <- res_df %>%
   select(AGI_STUB, res) %>%
   group_by(AGI_STUB) %>%
@@ -434,7 +496,7 @@ wts_wh %>%
   group_by(AGI_STUB) %>%
   slice_head(n=4)
 
-#.. retrieve initial state weights
+#.. retrieve initial state weights and calculate national sum for each record ----
 # res_df$res[[1]]$whs[1:10, ] # examine the whs matrix; AGI_STUB 1 is bad
 wts_whs <- res_df %>%
   unnest_wider(res) %>%
@@ -443,14 +505,14 @@ wts_whs <- res_df %>%
   unnest(c(sortid, whs)) %>%
   pivot_wider(names_from = STATE, values_from=whs)
 
-#.. combine weights and calculate new national weight as sum of state weights
 wts_all <- wts_wh %>%
   left_join(wts_whs, by = c("AGI_STUB", "sortid")) %>%
   mutate(wh_sum=rowSums(across(-c(AGI_STUB, sortid, wh)))) %>%
   select(AGI_STUB, sortid, wh, wh_sum, everything())
 glimpse(wts_all)
 
-# examine the new national weight in comparison to original
+
+#.. calculate & compare NATIONAL targets with new initial state weights ----
 wts_all %>%
   select(AGI_STUB, sortid, wh, wh_sum) %>%
   mutate(ratio = wh_sum / wh) %>%
@@ -462,7 +524,6 @@ wts_all %>%
   group_by(AGI_STUB) %>%
   do(qtiledf(.$ratio, probs=probs1_99))
 
-# compare calculated national targets with new state-sum weights to targets ----
 calctargs <- pufstrip %>%
   right_join(wts_all %>% select(AGI_STUB, sortid, wh_sum),
              by = c("sortid", "AGI_STUB")) %>%
@@ -479,7 +540,7 @@ calctargs
 calctargs %>%
   arrange(-abs(pdiff))
 
-# compare calculated targets to target values, by state and AGI stub ----
+#.. calculate & compare STATE targets with new initial state weights ----
 calc_targ <- calc_targets(wtsdf=wts_all, pufdf=pufstrip)
 
 target_comp <- bind_rows(puf_targ %>% mutate(type="target"),
@@ -513,7 +574,7 @@ ustargs <- puf_targ %>%
   summarise(across(.fns=sum), .groups="drop")
 ustargs
 
-#.. test the function ----
+#.. test the reweighting function on a single AGI_STUB ----
 d <- stub_opt(1)
 d$solver_message
 quantile(d$result$solution)
@@ -521,10 +582,13 @@ d$weights_df
 
 
 #.. loop through the stubs ----
-# cluster <- new_cluster(6)
+# CAUTION: DO NOT DO THIS IN PARALLEL -
+# bugs not yet worked out - apparently multidplyr cannot handle all functions that
+# are used in serial
+# it is fast enough in serial
 
-# CAUTION: unfortunately no progress reporting when run in parallel
-# parallel <- TRUE
+# cluster <- new_cluster(6)
+# parallel <- TRUE # NOTE: unfortunately no progress reporting when run in parallel
 parallel <- FALSE
 
 if(parallel){
@@ -550,7 +614,7 @@ opt_df <- tibble(AGI_STUB=1:10) %>%
   arrange(AGI_STUB) # must sort if parallel
 b <- proc.time()
 b - a # seconds
-(b - a) / 60 # minutes 69 minutes
+(b - a) / 60 # minutes -- < 1 minute in serial
 
 # saveRDS(opt_df, here::here("ignore", "opt_df.rds"))
 # opt_df <- readRDS(here::here("ignore", "opt_df.rds"))
@@ -565,17 +629,7 @@ tmp
 # rlang::last_error()
 # rlang::last_trace()
 
-
-# 7. calculate adjusted state weights that hit the adjusted national total ----
-
-# mutate(whs=map(whs, function(mat) mat[, 1])) %>% # get whs vector for each state
-# wts_whs <- res_df %>%
-#   unnest_wider(res) %>%
-#   select(AGI_STUB, STATE, sortid, whs) %>%
-#   mutate(whs=map(whs, function(mat) mat[, 1])) %>% # get whs vector for each state
-#   unnest(c(sortid, whs)) %>%
-#   pivot_wider(names_from = STATE, values_from=whs)
-
+# 7. retrieve adjusted national weights and scale initial state weights ----
 names(opt_df$output[[1]])
 # opt_df$output[[1]]$weights_df # AGI_STUB sortid iweight     x whs_adj
 wts_adj <- opt_df %>%
@@ -586,14 +640,28 @@ wts_adj <- opt_df %>%
   unnest(col=weights_df) %>%
   ungroup %>%
   left_join(wts_all, by = c("AGI_STUB", "sortid")) %>%
-  mutate(across(-c(AGI_STUB, sortid, iweight, x, wh_adj, wh, wh_sum),
+  mutate(across(-c(AGI_STUB, sortid, iweight, x, wh, wh_sum, wh_adj),
                 function(wt) wt * x)) %>%
-  mutate(wh_adjsum=rowSums(across(-c(AGI_STUB, sortid, iweight, x, wh_adj, wh, wh_sum)))) %>%
-  select(AGI_STUB, sortid, iweight, x, starts_with("wh"), everything())
+  select(-iweight, -x) %>%
+  mutate(wh_adjsum=rowSums(across(all_of(c(state.abb, "DC", "OA"))))) %>% # this is just a check to verify sums
+  select(AGI_STUB, sortid, wh, wh_sum, wh_adj, wh_adjsum, everything())
+
+# make sure all looks good
+wts_adj %>%
+  select(AGI_STUB, sortid, wh, wh_sum, wh_adj, wh_adjsum) %>%
+  ht
+
+wts_adj %>%
+  mutate(diff=wh_adjsum - wh_adj) %>%
+  do(qtiledf(.$diff))
+
+# looks good so drop the check variable
+wts_adj <- wts_adj %>%
+  select(-wh_adjsum)
 
 
+#.. calculate state-AGI_STUB targets using scaled initial state weights ----
 calc_targ_adj <- calc_targets(wtsdf=wts_adj, pufdf=pufstrip)
-
 
 target_comp_adj <- bind_rows(puf_targ %>% mutate(type="target"),
                              calc_targ_adj %>% mutate(type="calc")) %>%
@@ -609,75 +677,310 @@ target_comp_adj <- bind_rows(puf_targ %>% mutate(type="target"),
             by = c("AGI_STUB", "STATE", "targname")) %>%
   mutate(targeted=ifelse(is.na(targeted), FALSE, TRUE))
 
-target_comp_adj %>%
-  filter(STATE=="CT") %>%
-  arrange(-abs(pdiff))
+# pick a state and income group, compare target differences with
+# initial state weights and with adjusted initial state weights
+st <- "NY"; ig <- 10
 
+# initial first, then adjusted
 target_comp %>%
-  filter(STATE=="CT") %>%
+  filter(STATE==st, AGI_STUB==ig) %>%
   arrange(-abs(pdiff))
 
 target_comp_adj %>%
-  filter(STATE=="NY", AGI_STUB==10) %>%
+  filter(STATE==st, AGI_STUB==ig) %>%
   arrange(-abs(pdiff))
 
-target_comp %>%
-  filter(STATE=="NY", AGI_STUB==10) %>%
-  arrange(-abs(pdiff))
+#.. question: are the adjusted initial state weights good enough or do we need final step? ----
+# use adjusted targets from below
+check <- good_values_adj %>%
+  select(AGI_STUB, STATE, name, target=value_adj) %>%
+  left_join(target_comp_adj %>%
+              select(AGI_STUB, STATE, name=targname, calc, targeted),
+            by = c("AGI_STUB", "STATE", "name")) %>%
+  mutate(diff=calc - target,
+         pdiff=diff / target * 100) %>%
+  ungroup
+summary(check)
 
-wts_all_natladj <- wts_all %>%
-  left_join(iweights2 %>% select(sortid, wh_sumadj), by = "sortid") %>%
-  select(AGI_STUB, sortid, wh, wh_sum, wh_sumadj, everything())
+check %>%
+  filter(AGI_STUB==2, name %in% target_vars) %>% # target vars from below
+  group_by(name) %>%
+  summarise(sse=sum(pdiff^2), .groups="drop") %>%
+  arrange(sse) %>%
+  mutate(sse_sum=cumsum(sse),
+         pct=sse / max(sse_sum) * 100,
+         pct_sum=cumsum(pct))
 
 
-# 8. construct final state weights ----
-#.. 7-a use poisson method ----
-# targets
-# grab the targets for this STATE-AGI_STUB combination
-ig <- 1
+# 8. construct final state weights using poisson method ----
+#.. test a single income group ----
 
-wh <- wts_all_natladj %>%
+count(pufstrip, AGI_STUB)
+
+ig <- 4
+
+wh <- wts_adj %>%
   filter(AGI_STUB==ig) %>%
-  .$wh_sumadj # the new national weight -- use either wh_sum or wh_sumadj
+  .$wh_adj # the new national weight -- use either wh_sum or wh_sumadj
 
 # target_vars <- default_targets
 target_vars <- target_vars_df %>%
   filter(STATE=="AL", AGI_STUB==ig) %>%
   .$target_vec %>%
   unlist
-
-targets <- puf_targ %>%
-  filter(AGI_STUB==ig) %>%
-  select(AGI_STUB, STATE, all_of(target_vars))
-
-targmat <- targets %>%
-  select(all_of(target_vars)) %>%
-  as.matrix
-rownames(targmat) <- targets$STATE
-targmat
+# target_vars <- setdiff(target_vars, "posAGI_nnz") # seems to be a problem
 
 xmat <- pufstrip %>%
   filter(AGI_STUB==ig) %>%
   select(all_of(target_vars)) %>%
   as.matrix
 
-# res1 <- geoweight(wh = wh, xmat = xmat, targets = targmat, method = 'Broyden')
-res2 <- geoweight(wh = wh, xmat = xmat, targets = targmat, method = 'LM') # best
-# res3 <- geoweight(wh = wh, xmat = xmat, targets = targmat, method = 'Newton')
+check <- check_xmat(xmat)
+check
+# print(check)
+if(check$remove > 0) {
+  print(paste0("WARNING: Removing linearly dependent column: ", target_vars[check$remove]))
+  print("CAUTION: Not checking for further linear dependence...")
+  xmat <- xmat[, -check$remove]
+  target_vars <- target_vars[-check$remove]
+}
 
-res1$targets_pctdiff %>% round(2)
-res2$targets_pctdiff %>% round(2)
-res3$targets_pctdiff %>% round(2)
+targets <- puf_targ %>%
+  filter(AGI_STUB==ig) %>%
+  select(AGI_STUB, STATE, all_of(target_vars))
 
-res2$h; res2$s; res2$k
-res2$opts_used
+targets_adj <- good_values_adj %>%
+  filter(AGI_STUB==ig) %>%
+  select(AGI_STUB, STATE, N1_nnz, name, value_adj) %>%
+  pivot_wider(values_from = value_adj) %>%
+  select(AGI_STUB, STATE, all_of(target_vars)) # ensure that columns are in the original order
+
+# after reviewing, use targets_adj instead of targets
+targmat <- targets %>%
+  select(all_of(target_vars)) %>%
+  as.matrix
+rownames(targmat) <- targets$STATE
+
+targmat_adj <- targets_adj %>%
+  select(all_of(target_vars)) %>%
+  as.matrix
+rownames(targmat_adj) <- targets$STATE
+
+# compare the two
+# targmat
+# targmat_adj
+# targmat_adj - targmat
+
+
+
+# # note targmat_adj, also note that matrix was made invertible first
+res.lm <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'LM',
+                 maxiter=75, opts=list(factor=50)) # ssew 140644.5 38 mins for 10 iterations; ssew  28113, ~120 mins for 30 iterations
+
+res.lm2 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'LM',
+                 betavec=as.vector(res.lm$beta_opt_mat), maxiter=10) # ssew  101986.4 15.5 mins, 4 iterations [on top of prior 10]
+
+res.n <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Newton',
+                   maxiter=75)  # ssew 92065.48, 38 mins with 10 iterations, ssew 84.1 mins with 30 iterations
+
+res.n2 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Newton',
+                    betavec=as.vector(res.n$beta_opt_mat), maxiter=10) # ssew 108.7 39 mins
+
+res.n3 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Newton',
+                    betavec=as.vector(res.n2$beta_opt_mat), maxiter=10) # ssew 84.1 40 mins
+
+res.n4 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Newton',
+                    betavec=as.vector(res.n3$beta_opt_mat), maxiter=10) # 75439 51 mins
+res.n5 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Newton',
+                    betavec=as.vector(res.n4$beta_opt_mat), maxiter=10) # 73567 51 mins
+res.n6 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Newton',
+                    betavec=as.vector(res.n5$beta_opt_mat), maxiter=10) # 72156 51 mins
+
+res.b <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Broyden'
+                   , maxiter=500) # 640176.7,  44 mins
+
+res.n6lm <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'LM',
+                     betavec=as.vector(res.n6$beta_opt_mat), maxiter=10) # 69556 51 mins
+
+res.n6lm2 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'LM',
+                      betavec=as.vector(res.n6lm$beta_opt_mat), maxiter=10) # 68932 35.6 mins
+
+res.n6lm2n <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Newton',
+                    betavec=as.vector(res.n6lm2$beta_opt_mat), maxiter=10)
+res.n6lm2n <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Newton',
+                        betavec=as.vector(res.n6lm2n$beta_opt_mat), maxiter=10)
+
+res.n6lm2nlm <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'LM',
+                        betavec=as.vector(res.n6lm2n$beta_opt_mat), maxiter=10) # 68274.76 51 mins
+
+# saveRDS(res.n6lm2nlm, here::here("ignore", paste0("final_ig", ig, "res.n6lm2nlm.rds")))
+
+# res <- readRDS(here::here("ignore", paste0("final_ig", ig, "res.n6lm2nlm.rds")))
+
+memory()
+res <- res.lm
+res <- res.n
+res$sse_weighted
+res$etime / 60
+res$targets_pctdiff %>% round(2)
+
+check2 <- as_tibble(res$targets_pctdiff, rownames = "STATE") %>%
+  pivot_longer(-STATE) %>%
+  mutate(sse=value^2)
+
+# get top differences
+check2 %>%
+  slice_max(sse, n=30)
+
+# get sse by variable
+check2 %>%
+  group_by(name) %>%
+  summarise(maxapdiff=max(abs(value)),
+            sse=sum(sse), .groups="drop") %>%
+  arrange(sse) %>%
+  mutate(sse_sum=cumsum(sse),
+         pct=sse / max(sse_sum) * 100,
+         pct_sum=cumsum(pct))
+
+# get sse by state
+check2 %>%
+  group_by(STATE) %>%
+  summarise(maxapdiff=max(abs(value)),
+            sse=sum(sse), .groups="drop") %>%
+  arrange(sse) %>%
+  mutate(sse_sum=cumsum(sse),
+         pct=sse / max(sse_sum) * 100,
+         pct_sum=cumsum(pct))
+
+
+check %>%
+  filter(AGI_STUB==2, name %in% target_vars) %>% # target vars from below
+  group_by(name) %>%
+  summarise(sse=sum(pdiff^2), .groups="drop") %>%
+  arrange(sse) %>%
+  mutate(sse_sum=cumsum(sse),
+         pct=sse / max(sse_sum) * 100,
+         pct_sum=cumsum(pct))
+
+
+res.n6$sse_weighted
+res.n6$etime / 60
+res.n6$targets_pctdiff %>% round(2)
+
+
+
+# saveRDS(res.n6lm2, here::here("ignore", paste0("final_ig", ig, ".rds")))
+res_old <- readRDS(here::here("ignore", paste0("final_ig", ig, ".rds")))
+names(res_old)
+names(res_old$output)
+res_old$output$rsstrace
+res_old$sse_weighted
+res_old$etime / 60
+# 2.779721e+09 2.583346e+09 2.247818e+09 1.684735e+09 9.052827e+08 2.149220e+08 1.550671e+07 3.344061e+06 6.783272e+05 3.742754e+05 3.288578e+05
+# at 97,  9.892193e+04
+
+res$sse_weighted
+res$etime
+res$targets_pctdiff %>% round(2)
+res$output$rsstrace
+
+res.n$sse_weighted
+res.n$etime / 60
+res.n$targets_pctdiff %>% round(2)
+
+res.b$sse_weighted
+res.b$etime
+res.b$targets_pctdiff %>% round(2)
+
+
+whs_adj_pctdiff <- target_comp_adj %>%
+  filter(AGI_STUB==ig) %>%
+  select(STATE, targname, pdiff) %>%
+  pivot_wider(names_from = targname, values_from = pdiff) %>%
+  select(STATE, all_of(target_vars))
+
+target_comp_adj %>%
+  filter(AGI_STUB==ig) %>%
+  filter(abs(pdiff) > 100)
+
+whs_adj_mat <- whs_adj_pctdiff %>%
+  select(all_of(target_vars)) %>%
+  as.matrix
+rownames(whs_adj_mat) <- whs_adj_pctdiff$STATE
+
+res$targets_pctdiff[1:26, 1:10] %>% round(2)
+whs_adj_mat[1:26, 1:10] %>% round(2)
+
+res$targets_pctdiff[1:26, 11:20] %>% round(2)
+whs_adj_mat[1:26, 11:20] %>% round(2)
+
+whs_adj_mat <- whs_adj_pctdiff %>%
+  select(all_of(target_vars)) %>%
+  as.matrix
+
+sum(res$targets_pctdiff ^ 2) #  98921
+sum(whs_adj_mat ^ 2) # Inf
+
+target_comp_adj %>%
+  filter(AGI_STUB==ig) %>%
+  filter(!is.infinite(abs(pdiff))) %>%
+  summarise(sse=sum(pdiff^2)) # 514866
+
+target_vars
+
+res$h; res$s; res$k
+res$opts_used
+res$solver_message
+res$etime
+res$sse_unweighted
+res$sse_weighted
+
+#.. is it any easier if we try to establish a better starting point? ----
+p <- list()
+p$wh <- wh
+p$xmat <- xmat
+p$targets <- targmat_adj
+p$h <- nrow(xmat)
+p$s <- nrow(targmat_adj)
+p$k <- ncol(xmat)
+
+spoint <- get_starting_point(p) # newton
+targs <- targets_mat(spoint$spoint, wh, xmat, s)
+(targs - targmat_adj) %>% round(2)
+
+spoint.lm <- get_starting_point(p)
+targs <- targets_mat(spoint.lm$spoint, wh, xmat, s=nrow(targmat_adj))
+(targs - targmat_adj) %>% round(2)
+pdiff <- ((targs - targmat_adj) / targmat_adj * 100)
+pdiff %>% round(2)
+sum(pdiff^2)
+spoint.lm$result$etime
+
+res2 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'LM', betavec=spoint.lm$spoint, maxiter = 20) # note targmat_adj
 res2$solver_message
-res2$etime
-res2$sse_unweighted
+res2$sse_weighted # did not work well
 
-#.. 7-b use reweight method ----
-# get the initial state weights from step 5
-# rescale so that they hit the new national weights from step 6
+res3 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Broyden', maxiter = 2000) # note targmat_adj
+res3$etime
+res3$targets_pctdiff %>% round(2)
+res3$sse_weighted
+as.vector(res3$beta_opt_mat)
+
+res4 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'Broyden', betavec= as.vector(res3$beta_opt_mat), maxiter = 1000) # note targmat_adj
+res4$etime
+# saveRDS(res3, here::here("ignore", paste0("final_ig", ig, "_Broyden.rds")))
+
+#.. loop over all income groups -- maybe run overnight ----
+
+
+# 9. check results ----
+# [TO COME]
+
+
+
+# APPENDIX: step 8 final weights using reweighting method ----
+# get the initial state weights from step x
+# rescale so that they hit the new national weights from step y
 # use ipopt with state constraints and adding-up constraints
 # let's keep states in alpha order throughout, even OA
 
@@ -733,9 +1036,9 @@ igdata <- pufstrip %>%
 
 
 cc_sparse <- get_cc_states(.incgroup_data = igdata,
-                             .target_vars = target_vars,
-                             .iweights = iweights3,
-                             .targets_df = targdf)
+                           .target_vars = target_vars,
+                           .iweights = iweights3,
+                           .targets_df = targdf)
 
 inputs <- get_inputs(.targets_df = targdf,
                      .iweights = iweights3,
@@ -803,8 +1106,25 @@ quantile(result$solution, probs=c(0, .01, .05, .1, .25, .5, .75, .9, .95, .99, 1
 
 ht(inputs$cc_sparse)
 
+# old bad targets ----
+# get bad targets
+targets_bad <- shareslong %>%
+  filter(is.na(target) | target==0) %>%
+  select(AGI_STUB, STATE, targname) %>%
+  group_by(AGI_STUB, STATE) %>%
+  summarise(badtargets=list(as.vector(targname)), .groups="drop")
 
-
-# 8. check results ----
-# [TO COME]
+remove_bad <- function(target_vec, badtargets) {
+  diff <- setdiff(unlist(target_vec), unlist(badtargets))
+  list(diff)
+}
+target_vars_df <- expand_grid(STATE=unique(puf_targ$STATE),
+                              AGI_STUB=unique(puf_targ$AGI_STUB)) %>%
+  left_join(targets_bad, by = c("STATE", "AGI_STUB")) %>%
+  rowwise() %>%
+  mutate(target_vec=case_when(AGI_STUB == 1 ~ list(basic_targets),
+                              STATE == "OA" ~ list(basic_targets),
+                              TRUE ~ list(default_targets)),
+         target_vec=remove_bad(target_vec, badtargets))
+target_vars_df %>% filter(STATE=="OA")
 

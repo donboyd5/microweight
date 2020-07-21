@@ -49,6 +49,8 @@ A list with the following elements:
 \item{whs}{h x s matrix of state weights for each household, computed
 using the optimal parameters}
 \item{wh}{the input vector of household total weights, length h}
+\item{xmat}{matrix of data for households, h x k}
+\item{dweights}{optional vector of weighting factors for targets, length s * k}
 \item{output}{list of output from the solver that was used}
 }
 }

@@ -8,7 +8,24 @@ remove_suffix <- function(suffix, target_vars) {
 }
 
 
-one_state <- function(st, incgroup, target_vars_df, quiet=TRUE, method='LM'){
+check_xmat <- function(xmat){
+  xmat_rank <- qr(xmat[,])$rank
+
+  rankifremoved <- sapply(1:ncol(xmat), function (x) qr(xmat[,-x])$rank)
+
+  lindep_cols <- which(rankifremoved == max(rankifremoved)) # indices of columns that are linearly dependent
+  if(length(lindep_cols) == xmat_rank) lindep_cols <- 0
+
+  check <- list()
+  check$rank <- xmat_rank
+  check$rankifremoved <- rankifremoved
+  check$lindep_cols <- lindep_cols
+  check$remove <- max(lindep_cols)
+  check
+}
+
+
+one_state <- function(st, incgroup, target_vars_df, quiet=TRUE, method='LM', maxiter=50){
   print(sprintf("State: %s, Income group: %i", st, incgroup))
 
   # grab the targets for this STATE-AGI_STUB combination
@@ -16,6 +33,21 @@ one_state <- function(st, incgroup, target_vars_df, quiet=TRUE, method='LM'){
     filter(STATE==st, AGI_STUB==incgroup) %>%
     .$target_vec %>%
     unlist
+
+  xmat <- pufstrip %>%
+    filter(AGI_STUB==incgroup) %>%
+    select(all_of(target_vars)) %>%
+    as.matrix
+
+  # only check once!!??
+  check <- check_xmat(xmat)
+  # print(check)
+  if(check$remove > 0) {
+    print(paste0("WARNING: Removing linearly dependent column: ", target_vars[check$remove]))
+    print("CAUTION: Not checking for further linear dependence...")
+    xmat <- xmat[, -check$remove]
+    target_vars <- target_vars[-check$remove]
+  }
 
   targs <- puf_targ %>%
     filter(AGI_STUB==incgroup) %>%
@@ -30,11 +62,6 @@ one_state <- function(st, incgroup, target_vars_df, quiet=TRUE, method='LM'){
   rownames(targmat) <- targs$STATE
   targmat
 
-  xmat <- pufstrip %>%
-    filter(AGI_STUB==incgroup) %>%
-    select(all_of(target_vars)) %>%
-    as.matrix
-
   sortid <- pufstrip %>%
     filter(AGI_STUB==incgroup) %>%
     .$sortid
@@ -43,15 +70,7 @@ one_state <- function(st, incgroup, target_vars_df, quiet=TRUE, method='LM'){
     filter(AGI_STUB==incgroup) %>%
     .$s006
 
-  p <- list()
-  p$s <- nrow(targmat)
-  p$k <- ncol(targmat)
-  p$h <- length(wh)
-  p$wh <- wh
-  p$targets <- targmat
-  p$xmat <- xmat
-
-  result <- geoweight(wh=p$wh, xmat=p$xmat, targets=p$targets, method = method, quiet=quiet)
+  result <- geoweight(wh=wh, xmat=xmat, targets=targmat, method = method, quiet=quiet, maxiter=maxiter)
   result$sortid <- sortid
 
   return(result)

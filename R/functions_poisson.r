@@ -265,7 +265,7 @@ get_starting_point <- function(p){
 
     print("Solving small problem...")
     res <- geoweight(wh=p2$wh, xmat=p2$xmat, targets=p2$targets,
-                     method = 'Newton', maxiter = 50, quiet=TRUE)
+                     method = 'LM', maxiter = 50, quiet=FALSE)
 
     splist <- list()
     splist$spoint <- as.vector(res$beta_opt_mat)
