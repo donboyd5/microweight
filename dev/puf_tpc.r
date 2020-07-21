@@ -658,7 +658,7 @@ wts_adj %>%
 # looks good so drop the check variable
 wts_adj <- wts_adj %>%
   select(-wh_adjsum)
-
+wts_adj
 
 #.. calculate state-AGI_STUB targets using scaled initial state weights ----
 calc_targ_adj <- calc_targets(wtsdf=wts_adj, pufdf=pufstrip)
@@ -717,11 +717,16 @@ check %>%
 
 count(pufstrip, AGI_STUB)
 
-ig <- 4
+ig <- 9
 
+# CAUTION: choice for wh below is important: use one of the following as national weights
+# create wh:
+# - wh for original file weights or
+# - whsum for national weights constructed as sum of state weights from the initial pass in step 5
+# - wh_adj for the national weights from step 5, adjusted to hit/approximate national targets
 wh <- wts_adj %>%
   filter(AGI_STUB==ig) %>%
-  .$wh_adj # the new national weight -- use either wh_sum or wh_sumadj
+  .$wh # the new national weight -- use either wh_sum or wh_adj -- or wh for original weight
 
 # target_vars <- default_targets
 target_vars <- target_vars_df %>%
@@ -775,7 +780,7 @@ rownames(targmat_adj) <- targets$STATE
 
 # # note targmat_adj, also note that matrix was made invertible first
 res.lm <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'LM',
-                 maxiter=75, opts=list(factor=50)) # ssew 140644.5 38 mins for 10 iterations; ssew  28113, ~120 mins for 30 iterations
+                 maxiter=50, opts=list(factor=50)) # ssew 140644.5 38 mins for 10 iterations; ssew  28113, ~120 mins for 30 iterations
 
 res.lm2 <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'LM',
                  betavec=as.vector(res.lm$beta_opt_mat), maxiter=10) # ssew  101986.4 15.5 mins, 4 iterations [on top of prior 10]
@@ -971,6 +976,40 @@ res4$etime
 # saveRDS(res3, here::here("ignore", paste0("final_ig", ig, "_Broyden.rds")))
 
 #.. loop over all income groups -- maybe run overnight ----
+
+cluster <- new_cluster(6)
+
+# CAUTION: unfortunately no progress reporting when run in parallel
+parallel <- TRUE
+# parallel <- FALSE
+
+if(parallel){
+  # set the latest versions of functions, etc. up for the run
+  cluster_copy(cluster, c('one_state', 'check_xmat', 'puf_targ',
+                          'pufstrip', 'target_vars_df')) # functions and data not in a library
+  cluster_library(cluster, c("dplyr", "microweight", "tidyr", "purrr"))
+}
+
+a <- proc.time()
+res_df <- puf_targ %>%
+  select(AGI_STUB, STATE) %>%
+  # filter(AGI_STUB %in% 2:3, STATE %in% c("AL", "CA", "IL")) %>%
+  # filter(AGI_STUB == 1) %>%
+  # filter(STATE == "OA") %>%
+  group_by(AGI_STUB, STATE) %>%
+  nest()  %>%
+  {if (parallel) partition(., cluster) else .} %>%
+  mutate(res=map(STATE, one_state, incgroup=AGI_STUB, target_vars_df=target_vars_df, quiet=TRUE)) %>%
+  {if (parallel) collect(.) else .} %>%
+  ungroup %>%
+  arrange(AGI_STUB, STATE) # must sort if parallel
+b <- proc.time()
+b - a # seconds
+(b - a) / 60 # minutes 35 minutes
+
+# save results as the above can take a long time to run
+# system.time(saveRDS(res_df, here::here("ignore", "single_states.rds"))) # 33 secs
+# res_df <- readRDS(here::here("ignore", "single_states.rds"))
 
 
 # 9. check results ----
