@@ -242,16 +242,16 @@ possible_target_vars
 #                "N09600_nnz", "A09600_sum")
 
 # best attempt
-default_targets <- c("N1_nnz", "MARS2_nnz",
-               "posAGI_nnz", "A00100_sum",
-               "N00200_nnz", "A00200_sum",
-               "N00700_nnz", "A00700_sum",
-               "N01000_nnz", "A01000_sum",
-               "N04470_nnz", "A04470_sum",
-               "N04800_nnz", "A04800_sum",
-               "N05800_nnz", "A05800_sum",
-               "N09600_nnz", "A09600_sum",
-               "N17000_nnz", "A17000_sum")
+# default_targets <- c("N1_nnz", "MARS2_nnz",
+#                "posAGI_nnz", "A00100_sum",
+#                "N00200_nnz", "A00200_sum",
+#                "N00700_nnz", "A00700_sum",
+#                "N01000_nnz", "A01000_sum",
+#                "N04470_nnz", "A04470_sum",
+#                "N04800_nnz", "A04800_sum",
+#                "N05800_nnz", "A05800_sum",
+#                "N09600_nnz", "A09600_sum",
+#                "N17000_nnz", "A17000_sum")
 
 # drop the 5800 and 9600 targets as they give a LOT of problems
 default_targets <- c("N1_nnz", "MARS2_nnz",
@@ -977,6 +977,88 @@ res4$etime
 
 #.. loop over all income groups -- maybe run overnight ----
 
+final_stub <- function(ig, target_vars, maxiter=50, opts=NULL, weight_name="wh", fnbase="final"){
+  # weight_name:
+  #   wh original weight from the PUF
+  #   wh_sum sum of weights after estimating model for each state-stub combination
+  #   wh_adj wh_sum after adjustment to hit national targets
+  wh <- wts_adj %>%
+    filter(AGI_STUB==ig) %>%
+    .[[weight_name]] # the new national weight -- use either wh_sum or wh_adj -- or wh for original weight
+
+  # target_vars <- default_targets
+  target_vars <- target_vars_df %>%
+    filter(STATE=="AL", AGI_STUB==ig) %>%
+    .$target_vec %>%
+    unlist
+
+  sortid <- pufstrip %>%
+    filter(AGI_STUB==ig) %>%
+    .$sortid
+
+  xmat <- pufstrip %>%
+    filter(AGI_STUB==ig) %>%
+    select(all_of(target_vars)) %>%
+    as.matrix
+
+  check <- check_xmat(xmat)
+
+  if(check$remove > 0) {
+    print(paste0("WARNING: Removing linearly dependent column: ", target_vars[check$remove]))
+    print("CAUTION: Not checking for further linear dependence...")
+    xmat <- xmat[, -check$remove]
+    target_vars <- target_vars[-check$remove]
+  }
+
+  targets <- puf_targ %>%
+    filter(AGI_STUB==ig) %>%
+    select(AGI_STUB, STATE, all_of(target_vars))
+
+  targets_adj <- good_values_adj %>%
+    filter(AGI_STUB==ig) %>%
+    select(AGI_STUB, STATE, N1_nnz, name, value_adj) %>%
+    pivot_wider(values_from = value_adj) %>%
+    select(AGI_STUB, STATE, all_of(target_vars)) # ensure that columns are in the original order
+
+  targmat_adj <- targets_adj %>%
+    select(all_of(target_vars)) %>%
+    as.matrix
+  rownames(targmat_adj) <- targets$STATE
+
+  output <- geoweight(wh = wh, xmat = xmat, targets = targmat_adj, method = 'LM',
+                      maxiter=maxiter, opts=list(factor=50))
+  output$sortid <- sortid
+
+  fname <- paste0(fnbase, "_", "ig", ig, ".rds")
+  saveRDS(output, here::here("ignore", fname))
+  return(output)
+}
+
+
+
+
+res <- final_stub(1, maxiter=5)
+res$result$etime
+
+
+library(furrr) # parallel purrr
+future::plan(multiprocess)
+a <- proc.time()
+messages <- map(1:2, final_stub, maxiter=5)
+b <- proc.time()
+(b - a) / 60
+
+
+a2 <- proc.time()
+pmessages <- future_map(1:2, final_stub, maxiter=5, fnbase="pfinal", .progress=TRUE)
+b2 <- proc.time()
+(b2 - a2) / 60
+
+
+
+
+
+
 cluster <- new_cluster(6)
 
 # CAUTION: unfortunately no progress reporting when run in parallel
@@ -985,38 +1067,136 @@ parallel <- TRUE
 
 if(parallel){
   # set the latest versions of functions, etc. up for the run
-  cluster_copy(cluster, c('one_state', 'check_xmat', 'puf_targ',
-                          'pufstrip', 'target_vars_df')) # functions and data not in a library
+  # functions and data not in a library
+  cluster_copy(cluster, c('final_stub', 'check_xmat', 'good_values_adj',
+                          'puf_targ', 'pufstrip', 'target_vars_df', 'wts_adj'))
   cluster_library(cluster, c("dplyr", "microweight", "tidyr", "purrr"))
 }
 
 a <- proc.time()
-res_df <- puf_targ %>%
+final_df <- puf_targ %>%
   select(AGI_STUB, STATE) %>%
-  # filter(AGI_STUB %in% 2:3, STATE %in% c("AL", "CA", "IL")) %>%
+  # filter(AGI_STUB %in% 1:2) %>%
   # filter(AGI_STUB == 1) %>%
-  # filter(STATE == "OA") %>%
-  group_by(AGI_STUB, STATE) %>%
+  group_by(AGI_STUB) %>%
   nest()  %>%
   {if (parallel) partition(., cluster) else .} %>%
-  mutate(res=map(STATE, one_state, incgroup=AGI_STUB, target_vars_df=target_vars_df, quiet=TRUE)) %>%
+  mutate(res=map(AGI_STUB, final_stub, maxiter=75, fnbase="pfinal")) %>%
   {if (parallel) collect(.) else .} %>%
   ungroup %>%
-  arrange(AGI_STUB, STATE) # must sort if parallel
+  arrange(AGI_STUB) # must sort if parallel
 b <- proc.time()
 b - a # seconds
-(b - a) / 60 # minutes 35 minutes
+(b - a) / 60 # 9.3 hours
 
 # save results as the above can take a long time to run
-# system.time(saveRDS(res_df, here::here("ignore", "single_states.rds"))) # 33 secs
-# res_df <- readRDS(here::here("ignore", "single_states.rds"))
+# system.time(saveRDS(final_df, here::here("ignore", "final_all.rds"))) # 33 secs
+# final_df <- readRDS(here::here("ignore", "final_all.rds"))
+memory()
 
 
 # 9. check results ----
-# [TO COME]
+final_df
+names(final_df$res[[1]])
+
+tmp <- final_df %>%
+  hoist(res, "solver_message", "sse_weighted")
+tmp
+
+tmp <- final_df %>%
+  hoist(res, "targets_pctdiff")
+tmp$targets_pctdiff[[10]] %>% round(2)
+
+check <- final_df %>%
+  hoist(res, "whs") %>%
+  select(AGI_STUB, whs)
+d <- check[1, ]
+d %>% unnest %>% as_tibble
+d %>%
+  unnest_auto(col=whs)
+
+wts_wh <- final_df %>%
+  select(AGI_STUB, res) %>%
+  group_by(AGI_STUB) %>%
+  slice(n=1) %>%
+  ungroup %>% # ungroup is needed but I don't know why
+  hoist(res,"wh") %>%
+  select(AGI_STUB, wh) %>%
+  unnest(c(wh))
+
+wts_wh <- wts_wh %>%
+  mutate(sortid=pufstrip$sortid,
+         s006=pufstrip$s006) %>%
+  select(sortid, AGI_STUB, s006, wh)
+
+wts_wh %>%
+  group_by(AGI_STUB) %>%
+  slice_head(n=4)
+
+#.. retrieve initial state weights and calculate national sum for each record ----
+# final_df$res[[1]]$whs[1:10, ] # examine the whs matrix; AGI_STUB 1 is bad
+f <- function(mat){
+  df <- as_tibble(mat) %>%
+    mutate(rn=row_number()) %>%
+    pivot_longer(-rn)
+}
+
+wts_whsfinal <- final_df %>%
+  hoist(res, "whs") %>%
+  select(AGI_STUB, whs) %>%
+  mutate(whs=map(whs, as_tibble)) %>%
+  unnest(cols=whs) %>%
+  mutate(sortid=pufstrip$sortid) %>%
+  select(sortid, AGI_STUB, everything())
+wts_whsfinal
 
 
+wts_final <- wts_wh %>%
+  left_join(wts_whsfinal, by = c("sortid", "AGI_STUB"))
+wts_final
+saveRDS(wts_final, here::here("ignore", "wts_final.rds"))
+write_csv(wts_final, here::here("ignore", "wts_final.csv"))
 
+# check the sums
+check <- wts_final %>%
+  mutate(wh_sum=rowSums(across(-c(sortid, AGI_STUB, sortid, s006, wh)))) %>%
+  select(sortid, AGI_STUB, s006, wh, wh_sum)
+check %>%
+  mutate(diff=wh_sum - wh) %>%
+  group_by(AGI_STUB) %>%
+  do(qtiledf(.$diff))
+
+# check targets
+calc_targ <- calc_targets(wtsdf=wts_final, pufdf=pufstrip)
+
+target_comp <- bind_rows(puf_targ %>% mutate(type="target"),
+                         calc_targ %>% mutate(type="calc")) %>%
+  pivot_longer(cols=-c(AGI_STUB, STATE, type),
+               names_to = "targname") %>%
+  pivot_wider(names_from=type) %>%
+  mutate(diff=calc - target,
+         pdiff=diff / target * 100) %>%
+  left_join(target_vars_df %>%
+              select(AGI_STUB, STATE, targname=target_vec) %>%
+              unnest(targname) %>%
+              mutate(targeted=TRUE),
+            by = c("AGI_STUB", "STATE", "targname")) %>%
+  mutate(targeted=ifelse(is.na(targeted), FALSE, TRUE))
+
+target_comp %>%
+  filter(STATE=="CT") %>%
+  arrange(-abs(pdiff))
+
+target_comp %>%
+  filter(STATE=="CT", targeted) %>%
+  arrange(-abs(pdiff))
+
+target_comp %>%
+  filter(STATE=="NY", AGI_STUB==10) %>%
+  arrange(-abs(pdiff))
+
+
+# BELOW HERE IS APPENDIX ----
 # APPENDIX: step 8 final weights using reweighting method ----
 # get the initial state weights from step x
 # rescale so that they hit the new national weights from step y
