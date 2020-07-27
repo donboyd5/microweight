@@ -15,8 +15,8 @@ eval_g <- function(x, inputs) {
   #   nzcc
 
   constraint_tbl <- inputs$cc_sparse %>%
-    group_by(i) %>%
-    summarise(constraint_value=sum(nzcc * x[j]),
+    dplyr::group_by(i) %>%
+    dplyr::summarise(constraint_value=sum(nzcc * x[j]),
               .groups="keep")
   # the column constraint_value is a vector, in the order we want
 
@@ -52,7 +52,7 @@ define_jac_g_structure_sparse <- function(cc_sparse, ivar="i", jvar="j"){
   # ivar gives the variable name for the integer index indicating each CONSTRAINT
   # jvar gives the variable name (character) for the integer index indicating the nonzero x variables for that constraint
 
-  jac_sparse <- dlply(cc_sparse, ivar, function(x) return(x[[jvar]]))
+  jac_sparse <- plyr::dlply(cc_sparse, ivar, function(x) return(x[[jvar]]))
   attributes(jac_sparse) <- NULL # to be safe
 
   return(jac_sparse)

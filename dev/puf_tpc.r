@@ -41,7 +41,7 @@ devtools::session_info()
 # functions ----
 source(here::here("dev", "functions_puf_tpc.r"))
 source(here::here("dev", "functions_puf_ipoptr.r"))
-source(here::here("dev", "functions_ipopt.r"))
+source(here::here("R", "functions_ipopt.r"))
 source(here::here("dev", "functions_targets.r"))
 
 
@@ -217,41 +217,12 @@ ustargtot[, vars] %>%
 # "N09600_nnz", "A09600_sum" # Alternative minimum tax
 # "N17000_nnz", "A17000_sum" # Total medical and dental expense deduction
 
-# ivars <- c(1, 4, 6)
-# ivars <- c(1, 3, 5, 13, 14)
-# ivars <- c(1:4, 6:21) # 21 is top
-# (target_vars <- possible_target_vars[ivars])
-# target_vars <- c("N1_nnz", "MARS2_nnz", "posAGI_nnz", "N00200_nnz",
-#                  "A00100_sum", "A00200_sum")
-# target_vars <- setdiff(possible_target_vars, c("MARS1_nnz", "MARS2_nnz", "A09600_sum", "N09600_nnz")) # A09600_sum N09600_nnz
-# target_vars <- setdiff(possible_target_vars, c("MARS1_nnz", "MARS2_nnz")) # A09600_sum N09600_nnz
 # A09600_sum N09600_nnz have zeroes -- must adjust
 
 # define target_vars_df which will have different target vars for different
 # STATE-AGI_STUB combinations
 # we need to define fewer targets for income group 1, I think
 possible_target_vars
-
-# minimalist
-# default_targets <- c("N1_nnz", "MARS2_nnz",
-#                "posAGI_nnz", "A00100_sum",
-#                "N00200_nnz", "A00200_sum")
-# incgroup1_targets <- c("N1_nnz", "MARS2_nnz",
-#                "A00100_sum",
-#                "N00200_nnz", "A00200_sum",
-#                "N09600_nnz", "A09600_sum")
-
-# best attempt
-# default_targets <- c("N1_nnz", "MARS2_nnz",
-#                "posAGI_nnz", "A00100_sum",
-#                "N00200_nnz", "A00200_sum",
-#                "N00700_nnz", "A00700_sum",
-#                "N01000_nnz", "A01000_sum",
-#                "N04470_nnz", "A04470_sum",
-#                "N04800_nnz", "A04800_sum",
-#                "N05800_nnz", "A05800_sum",
-#                "N09600_nnz", "A09600_sum",
-#                "N17000_nnz", "A17000_sum")
 
 # drop the 5800 and 9600 targets as they give a LOT of problems
 default_targets <- c("N1_nnz", "MARS2_nnz",
@@ -263,13 +234,6 @@ default_targets <- c("N1_nnz", "MARS2_nnz",
                      "N04800_nnz", "A04800_sum",
                      "N17000_nnz", "A17000_sum")
 
-
-# basic targets for income group 1 and for OA
-# basic_targets <- c("N1_nnz", "MARS2_nnz",
-#                        "A00100_sum",
-#                        "N00200_nnz", "A00200_sum",
-#                        "N05800_nnz", "A05800_sum",
-#                        "N09600_nnz", "A09600_sum")
 
 
 #.. adjust targets to get rid of zero and NA values ----
@@ -573,6 +537,52 @@ ustargs <- puf_targ %>%
   select(-STATE) %>%
   summarise(across(.fns=sum), .groups="drop")
 ustargs
+
+# test my reweight function ----
+source(here::here("R", "reweight.r"))
+
+stub <- 10
+targs_stub <- ustargs %>%
+  filter(AGI_STUB == stub) %>%
+  pivot_longer(-AGI_STUB, names_to = "cname", values_to = "value") %>%
+  filter(!is.na(value))
+
+data_stub <- pufstrip %>%
+  filter(AGI_STUB == stub) %>%
+  select(AGI_STUB, sortid, all_of(targs_stub$cname))
+
+# iweights is vector, length n
+# xmat is n x k matrix of data
+# targets is vector, length k
+# target names is vector, length k
+# tol is vector, length k
+
+iweights <- wts_all %>% filter(AGI_STUB==stub) %>% .$wh_sum
+targets <- targs_stub$value
+target_names <- targs_stub$cname
+xmat <- data_stub %>%
+  select(all_of(target_names)) %>%
+  as.matrix
+tol <- abs(targets) * .005
+
+fname <- here::here("ignore", paste0("stubx", ".out"))
+optlist <- list(file_print_level = 5,
+                output_file = fname,
+                linear_solver = "ma57")
+
+# djb start up again here ----
+tmp <- reweight(iweights, targets, target_names, tol, xmat, optlist=optlist)
+names(tmp)
+tmp$solver_message
+tmp$etime
+names(tmp$result)
+tmp$targets_df %>%
+  mutate(across(c(target, targinit, targcalc, targtol, targinit_diff, targcalc_diff),
+                function(x) x = ifelse(str_detect(targname, "_sum"), x / 1000, x))) %>%
+  kable(digits=c(rep(0, 8), 1, 1, 1), format.args = list(big.mark = ","))
+
+tmp$weights
+
 
 #.. test the reweighting function on a single AGI_STUB ----
 d <- stub_opt(1)
@@ -1184,11 +1194,11 @@ target_comp <- bind_rows(puf_targ %>% mutate(type="target"),
   mutate(targeted=ifelse(is.na(targeted), FALSE, TRUE))
 
 target_comp %>%
-  filter(STATE=="CT") %>%
+  filter(STATE=="NY") %>%
   arrange(-abs(pdiff))
 
 target_comp %>%
-  filter(STATE=="CT", targeted) %>%
+  filter(STATE=="NY", targeted) %>%
   arrange(-abs(pdiff))
 
 target_comp %>%
