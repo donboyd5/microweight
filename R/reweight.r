@@ -1,52 +1,87 @@
-#' Reweight a microdata file
+#' Reweight a microdata file.
 #'
-#' \code{reweight} calculates new weights for each household in a microdata
-#' file that hit or come close to desired targets, while minimizing a measure of
-#' distortion
+#' \code{reweight} calculates new weights for each household in a microdata file
+#' so that (1) selected variables, weighted with the new weights and summed, hit
+#' or come close to desired targets, and (2) a measure of distortion based on
+#' how much the new weights are changed from an initial set of weights is
+#' minimized.
 #'
-#' \code{reweight} uses the IPOPT solver in the package \code{\link[ipoptr]{ipoptr}}
+#' @section Details:
 #'
-#' The problem is set up as a nonlinear program with constraints. The constraints are
-#' the desired targets. The user can set tolerances around these targets in which case
-#' they are inequality constraints. By default the distortion measure to be minimized
-#' is the sum of squared differences between 1 and the ratio of new weights to the initial weight.
-#' The user can provide alternative distortion measures.
+#' \code{reweight} uses the \href{https://coin-or.github.io/Ipopt/}{IPOPT
+#' solver} in the package \code{\link[ipoptr]{ipoptr}}. The problem is set up as
+#' a nonlinear program with constraints. The constraints are the desired
+#' targets. The user can set tolerances around these targets in which case they
+#' are inequality constraints. By default the distortion measure to be minimized
+#' is the sum of squared differences between 1 and the ratio of new weights to
+#' the initial weight. The user can provide alternative distortion measures.
 #'
-#'
-#' @param iweights vector of initial household weights
-#' @param xmat matrix of data for households, dimension h x k
-#' @param targets named vector of desired target values, length k
-#' @param maxiter integer; default 50
-#' @param opts list of options that will update ipopt options
-#' @param quiet c(TRUE, FALSE) FALSE is default; TRUE provides newlsqv or nls.lm output
+#' @param iweights Numeric vector of initial household weights, length h.
+#' @param targets Numeric vector of desired target values, length k.
+#' @param target_names Character vector of names for targets, length k.
+#' @param tol Numeric vector of additive tolerances for targets, length k. The
+#'   solver will seek to hit the targets, plus or minus tol.
+#' @param xmat Matrix of data for households, dimension h x k.
+#' @param xlb Numeric vector of lower bounds for the ratio of new weights to
+#'   initial weights. Default is 0.
+#' @param xub Numeric vector of upper bounds for the ration of new weights to
+#'   initial weights. Default is 50.
+#' @param maxiter Integer value for maximum number of iterations. Default is 50.
+#' @param optlist Named list of allowable
+#'   \href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options}.
 #'
 #' @returns A list with the following elements:
-#' \describe{
-#'   \item{nweights}{vector of new weights}
-#'   \item{iweights}{vector of original weights}
-#'   \item{result}{list of output from the solver that was used}
-#' }
+#' \describe{ \item{solver_message}{The message produced by IPOPT. See
+#' \href{https://coin-or.github.io/Ipopt/OUTPUT.html}{IPOPT output}.}
+#' \item{etime}{Elapsed time.} \item{objective}{The objective function value at
+#' the solution.} \item{weights}{Numeric vector of new weights.}
+#' \item{targets_df}{Data frame with target names and values, values at the
+#' starting point, values at the solution, tolerances, differences, and percent
+#' differences. The suffix diff indicates the difference from a target and the
+#' suffix pdiff indicates the percent difference from a target.}
+#' \item{result}{List with output from the solver that was used.}
 #' @examples
-#' # Example 1: Determine state weights for a simple problem with random data
-#' p <- make_problem(h=10, s=3, k=2)
-#' dw <- get_dweights(p$targets)
+#' # Example 1: Determine new weights for a simple problem with random data
+#' p <- make_problem(h=30, s=1, k=4)
+#' # we'll have 30 households (30 weights) and 4 targets
 #'
-#' res1 <- geoweight(wh = p$wh, xmat = p$xmat, targets = p$targets,
-#'   dweights = dw, quiet=TRUE)
+#' # break out needed components and prepare them for reweight
+#' iweights <- p$wh
+#'
+#' targets <- as.vector(p$targets)
+#' target_names <- paste0("targ", 1:length(targets))
+#' # the targets created by make_problem are hit exactly when using the initial
+#' # weights so perturb them slightly so that we have to find new weights
+#' set.seed(1234)
+#' noise <- rnorm(n=length(targets), mean = 0, sd = .02)
+#' targets <- targets * (1 + noise)
+#'
+#' tol <- .005 * abs(targets)
+#' xmat <- p$xmat
+#' colnames(xmat) <- target_names
+#'
+#' res <- reweight(iweights = iweights, targets = targets,
+#'                 target_names = target_names, tol = tol,
+#'                 xmat = xmat)
+#'
+#' res
 #' @export
-#'
-#'
-
 reweight <- function(iweights,
-                     targets, target_names, tol,
+                     targets,
+                     target_names,
+                     tol,
                      xmat,
-                     xlb=0, xub=50,
+                     xlb=0,
+                     xub=50,
                      maxiter = 50,
                      optlist = NULL){
+
   # stopifnot(all(!is.na(x$eval_jac_g(x$x0))))
   # stopifnot(is.function(x$eval_f))
-  if(optlist$file_print_level > 0) {
-    stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(optlist$output_file))
+  if(!is.null(optlist)){ # check options list
+    if(optlist$file_print_level > 0) {
+      stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(optlist$output_file))
+    }
   }
 
 
@@ -77,7 +112,7 @@ reweight <- function(iweights,
                        cc_sparse,
                        xlb, xub)
 
-  result <- ipoptr(x0 = inputs$x0,
+  result <- ipoptr::ipoptr(x0 = inputs$x0,
                    lb = inputs$xlb,
                    ub = inputs$xub,
                    eval_f = eval_f_xm1sq, # arguments: x, inputs; eval_f_xtop eval_f_xm1sq
@@ -103,7 +138,7 @@ reweight <- function(iweights,
   targets_df <- tibble::tibble(targnum = 1:length(targets),
                        targname = target_names,
                        target = targets) %>%
-    mutate(targinit = eval_g(inputs$x0, inputs),
+    dplyr::mutate(targinit = eval_g(inputs$x0, inputs),
            targcalc = result$constraints,
            targinit_diff = targinit - target,
            targtol = tol,
@@ -112,7 +147,10 @@ reweight <- function(iweights,
            targtol_pdiff = abs(targtol / target) * 100,
            targcalc_pdiff = targcalc_diff / target * 100)
 
-  keepnames <- c("solver_message", "etime", "objective", "weights",
+  keepnames <- c("solver_message",
+                 "etime",
+                 "objective",
+                 "weights",
                  "targets_df",
                  "result")
   output <- list()
@@ -135,13 +173,15 @@ get_cc_sparse <- function(xmat, target_names, iweights) {
     dplyr::filter(nzcc != 0) %>%
     dplyr::mutate(i=match(cname, target_names)) %>%
     dplyr::select(i, j, cname, nzcc, iweight, value) %>%
-    arrange(i, j) # this ordering is crucial for the Jacobian
+    dplyr::arrange(i, j) # this ordering is crucial for the Jacobian
 
   return(cc_sparse)
 }
 
 get_inputs <- function(iweights,
-                       targets, target_names, tol,
+                       targets,
+                       target_names,
+                       tol,
                        cc_sparse,
                        xlb, xub){
 

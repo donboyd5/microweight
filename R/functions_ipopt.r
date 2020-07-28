@@ -24,7 +24,6 @@ eval_g <- function(x, inputs) {
 }
 
 
-
 eval_jac_g <- function(x, inputs){
   # the Jacobian is the matrix of first partial derivatives of constraints (these derivatives may be constants)
   # this function evaluates the Jacobian at point x
