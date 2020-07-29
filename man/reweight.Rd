@@ -41,6 +41,7 @@ initial weights. Default is 50.}
 }
 \value{
 A list with the following elements:
+
 \describe{ \item{solver_message}{The message produced by IPOPT. See
 \href{https://coin-or.github.io/Ipopt/OUTPUT.html}{IPOPT output}.}
 \item{etime}{Elapsed time.} \item{objective}{The objective function value at
@@ -49,10 +50,10 @@ the solution.} \item{weights}{Numeric vector of new weights.}
 starting point, values at the solution, tolerances, differences, and percent
 differences. The suffix diff indicates the difference from a target and the
 suffix pdiff indicates the percent difference from a target.}
-\item{result}{List with output from the solver that was used.}
+\item{result}{List with output from the solver that was used.}}
 }
 \description{
-\code{reweight} calculates new weights for each household in a microdata file
+Calculate new weights for each household in a microdata file
 so that (1) selected variables, weighted with the new weights and summed, hit
 or come close to desired targets, and (2) a measure of distortion based on
 how much the new weights are changed from an initial set of weights is
@@ -64,8 +65,8 @@ solver} in the package \code{\link[ipoptr]{ipoptr}}. The problem is set up as
 a nonlinear program with constraints. The constraints are the desired
 targets. The user can set tolerances around these targets in which case they
 are inequality constraints. By default the distortion measure to be minimized
-is the sum of squared differences between 1 and the ratio of new weights to
-the initial weight. The user can provide alternative distortion measures.
+is the sum of squared differences between the ratio of new weights to
+the initial weight and 1. The user can provide alternative distortion measures.
 }
 \examples{
 # Example 1: Determine new weights for a simple problem with random data
