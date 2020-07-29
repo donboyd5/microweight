@@ -1,13 +1,14 @@
 #' Reweight a microdata file.
 #'
+#'
+#' @description
 #' \code{reweight} calculates new weights for each household in a microdata file
 #' so that (1) selected variables, weighted with the new weights and summed, hit
 #' or come close to desired targets, and (2) a measure of distortion based on
 #' how much the new weights are changed from an initial set of weights is
 #' minimized.
 #'
-#' @section Details:
-#'
+#' @details
 #' \code{reweight} uses the \href{https://coin-or.github.io/Ipopt/}{IPOPT
 #' solver} in the package \code{\link[ipoptr]{ipoptr}}. The problem is set up as
 #' a nonlinear program with constraints. The constraints are the desired

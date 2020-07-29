@@ -58,9 +58,7 @@ or come close to desired targets, and (2) a measure of distortion based on
 how much the new weights are changed from an initial set of weights is
 minimized.
 }
-\section{Details}{
-
-
+\details{
 \code{reweight} uses the \href{https://coin-or.github.io/Ipopt/}{IPOPT
 solver} in the package \code{\link[ipoptr]{ipoptr}}. The problem is set up as
 a nonlinear program with constraints. The constraints are the desired
@@ -69,7 +67,6 @@ are inequality constraints. By default the distortion measure to be minimized
 is the sum of squared differences between 1 and the ratio of new weights to
 the initial weight. The user can provide alternative distortion measures.
 }
-
 \examples{
 # Example 1: Determine new weights for a simple problem with random data
 p <- make_problem(h=30, s=1, k=4)

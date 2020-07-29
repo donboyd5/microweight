@@ -539,89 +539,32 @@ ustargs <- puf_targ %>%
 ustargs
 
 # test my reweight function ----
-source(here::here("R", "reweight.r"))
-
-stub <- 10
-targs_stub <- ustargs %>%
-  filter(AGI_STUB == stub) %>%
-  pivot_longer(-AGI_STUB, names_to = "cname", values_to = "value") %>%
-  filter(!is.na(value))
-
-data_stub <- pufstrip %>%
-  filter(AGI_STUB == stub) %>%
-  select(AGI_STUB, sortid, all_of(targs_stub$cname))
-
-# iweights is vector, length n
-# xmat is n x k matrix of data
-# targets is vector, length k
-# target names is vector, length k
-# tol is vector, length k
-
-iweights <- wts_all %>% filter(AGI_STUB==stub) %>% .$wh_sum
-targets <- targs_stub$value
-target_names <- targs_stub$cname
-xmat <- data_stub %>%
-  select(all_of(target_names)) %>%
-  as.matrix
-tol <- abs(targets) * .005
-
-fname <- here::here("ignore", paste0("stubx", ".out"))
-optlist <- list(file_print_level = 5,
-                output_file = fname,
-                linear_solver = "ma57")
-
-# djb start up again here ----
-tmp <- reweight(iweights, targets, target_names, tol, xmat, optlist=optlist)
-names(tmp)
-tmp$solver_message
-tmp$etime
-names(tmp$result)
-tmp$targets_df %>%
-  mutate(across(c(target, targinit, targcalc, targtol, targinit_diff, targcalc_diff),
-                function(x) x = ifelse(str_detect(targname, "_sum"), x / 1000, x))) %>%
-  kable(digits=c(rep(0, 8), 1, 1, 1), format.args = list(big.mark = ","))
-
-tmp$weights
-
+# source(here::here("R", "reweight.r"))
 
 #.. test the reweighting function on a single AGI_STUB ----
-d <- stub_opt(1)
+d <- one_stub(1)
+names(d)
 d$solver_message
 quantile(d$result$solution)
-d$weights_df
+d$targets_df
+
+d$targets_df %>%
+  mutate(across(c(target, targinit, targcalc, targtol, targinit_diff, targcalc_diff),
+                function(x) x = ifelse(str_detect(targname, "_sum"), x / 1000, x))) %>%
+  kable(digits=c(rep(0, 8), 2, 2, 2), format.args = list(big.mark = ","))
 
 
-#.. loop through the stubs ----
-# CAUTION: DO NOT DO THIS IN PARALLEL -
-# bugs not yet worked out - apparently multidplyr cannot handle all functions that
-# are used in serial
-# it is fast enough in serial
-
-# cluster <- new_cluster(6)
-# parallel <- TRUE # NOTE: unfortunately no progress reporting when run in parallel
-parallel <- FALSE
-
-if(parallel){
-  # set the latest versions of functions, etc. up for the run
-  cluster_copy(cluster,
-               c('stub_opt', 'ustargs', 'wts_all',
-                 'pufstrip', 'get_cc_national', 'get_inputs_national',
-                 'get_conbounds', 'scale_inputs', 'define_jac_g_structure_sparse',
-                 'eval_f_xm1sq', 'eval_grad_f_xm1sq',
-                 'eval_g', 'eval_jac_g',
-                 'eval_h_xm1sq')) # functions and data not in a library
-  cluster_library(cluster, c("dplyr", "ipoptr", "plyr", "tidyr", "purrr"))
-}
+#.. loop through the stubs in serial ----
+# CAUTION: DO NOT DO THIS IN PARALLEL with multidplyr
+# apparently multidplyr cannot handle all needed functions
+# but it is fast enough in serial
 
 a <- proc.time()
 opt_df <- tibble(AGI_STUB=1:10) %>%
   group_by(AGI_STUB) %>%
   nest()  %>%
-  {if (parallel) partition(., cluster) else .} %>%
-  mutate(output=map(AGI_STUB, stub_opt)) %>%
-  {if (parallel) collect(.) else .} %>%
-  ungroup %>%
-  arrange(AGI_STUB) # must sort if parallel
+  mutate(output=map(AGI_STUB, one_stub)) %>%
+  ungroup
 b <- proc.time()
 b - a # seconds
 (b - a) / 60 # minutes -- < 1 minute in serial
@@ -636,23 +579,23 @@ tmp <- opt_df %>%
   hoist(output, "solver_message")
 tmp
 
-# rlang::last_error()
-# rlang::last_trace()
 
 # 7. retrieve adjusted national weights and scale initial state weights ----
 names(opt_df$output[[1]])
 # opt_df$output[[1]]$weights_df # AGI_STUB sortid iweight     x whs_adj
-wts_adj <- opt_df %>%
-  hoist(output, "weights_df") %>%
-  select(AGI_STUB, weights_df) %>%
-  group_by(AGI_STUB) %>%
-  mutate(weights_df=map(weights_df, function(x) x %>% select(-AGI_STUB))) %>%
-  unnest(col=weights_df) %>%
-  ungroup %>%
-  left_join(wts_all, by = c("AGI_STUB", "sortid")) %>%
-  mutate(across(-c(AGI_STUB, sortid, iweight, x, wh, wh_sum, wh_adj),
+# "solver_message" "etime"          "objective"      "weights"        "targets_df"     "result"
+
+opt_wts <- opt_df %>%
+  hoist(output, "weights") %>%
+  select(AGI_STUB, weights) %>%
+  unnest(col=weights)
+
+wts_adj <- wts_all %>%
+  mutate(wh_adj=opt_wts$weights,
+         x=wh_adj / wh_sum) %>%
+  mutate(across(-c(AGI_STUB, sortid, x, wh, wh_sum, wh_adj),
                 function(wt) wt * x)) %>%
-  select(-iweight, -x) %>%
+  select(-x) %>%
   mutate(wh_adjsum=rowSums(across(all_of(c(state.abb, "DC", "OA"))))) %>% # this is just a check to verify sums
   select(AGI_STUB, sortid, wh, wh_sum, wh_adj, wh_adjsum, everything())
 

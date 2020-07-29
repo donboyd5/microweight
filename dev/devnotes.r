@@ -36,6 +36,13 @@ devtools::session_info()
 # Ctrl+Shift+D Update documentation
 # Ctrl+Shift+B Build and reload
 
+
+# documentation ----
+# https://cran.r-project.org/doc/manuals/r-release/R-exts.html#Sectioning
+# https://support.rstudio.com/hc/en-us/articles/200532317-Writing-Package-Documentation
+# https://cran.r-project.org/web/packages/roxygen2/vignettes/rd.html
+
+
 # package development tools ----
 library(usethis)
 library(devtools)
