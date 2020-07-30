@@ -1,10 +1,13 @@
 #' Reweight a microdata file.
 #'
+# This is a comment. It will not show in the documentation.
+#'
 #' Calculate new weights for each household in a microdata file
 #' so that (1) selected variables, weighted with the new weights and summed, hit
 #' or come close to desired targets, and (2) a measure of distortion based on
 #' how much the new weights are changed from an initial set of weights is
 #' minimized.
+#'
 #'
 #' @param iweights Numeric vector of initial household weights, length h.
 #' @param targets Numeric vector of desired target values, length k.
@@ -22,7 +25,8 @@
 #'
 #' @returns A list with the following elements:
 #'
-#' \describe{ \item{solver_message}{The message produced by IPOPT. See
+#' \describe{
+#' \item{solver_message}{The message produced by IPOPT. See
 #' \href{https://coin-or.github.io/Ipopt/OUTPUT.html}{IPOPT output}.}
 #' \item{etime}{Elapsed time.} \item{objective}{The objective function value at
 #' the solution.} \item{weights}{Numeric vector of new weights.}
@@ -30,7 +34,8 @@
 #' starting point, values at the solution, tolerances, differences, and percent
 #' differences. The suffix diff indicates the difference from a target and the
 #' suffix pdiff indicates the percent difference from a target.}
-#' \item{result}{List with output from the solver that was used.}}
+#' \item{result}{List with output from the solver that was used.}
+#' }
 #'
 #' @details
 #' \code{reweight} uses the \href{https://coin-or.github.io/Ipopt/}{IPOPT
@@ -38,8 +43,9 @@
 #' a nonlinear program with constraints. The constraints are the desired
 #' targets. The user can set tolerances around these targets in which case they
 #' are inequality constraints. By default the distortion measure to be minimized
-#' is the sum of squared differences between the ratio of new weights to
-#' the initial weight and 1. The user can provide alternative distortion measures.
+#' is the sum of squared differences between the ratio of each new weight to the
+#' corresponding initial weight and 1. The user can provide alternative
+#' distortion measures.
 #'
 #' @examples
 #' # Example 1: Determine new weights for a simple problem with random data
@@ -66,6 +72,67 @@
 #'                 xmat = xmat)
 #'
 #' res
+#'
+#' # Example 2: Determine new weights for a small problem using ACS data
+#' library(tidyverse)
+#' data(acsbig)
+#' data(acs_targets)
+
+#' # let's focus on income group 5 and create and then try to hit targets for:
+#' #    number of records (nrecs -- to be created based on the weight, pwgtp)
+#' #    personal income (pincp)
+#' #    wages (wagp)
+#' #    number of people with wages (wagp_nnz -- to be created)
+#' #    supplemental security income (ssip)
+#' #    number of people with supplemental security income (ssip_nnz -- to
+#'        be created)
+#' # we also need to get pwgtp - the person weight for each record, which
+#'        will be our initial weight
+#' # for each "number of" variable we need to create an indicator variable that
+#' # defines whether it is true for that record
+#'
+#' # get the data and prepare it
+#' data_df <- acsbig %>%
+#'   filter(incgroup == 5) %>%
+#'   select(pwgtp, pincp, wagp, ssip) %>%
+#'   # create the indicator variables
+#'   mutate(nrecs = 1, # indicator used for number of records
+#'          wagp_nnz = (wagp != 0) * 1.,
+#'          ssip_nnz = (ssip != 0) * 1.)
+#' data_df # 10,000 records
+#'
+#' # prepare targets: in practice we would get them from an external source but
+#' # in this case we'll get actual sums on the file and perturb them randomly
+#' # so that targets differ from initial sums
+#' set.seed(1234)
+#' targets_df <- data_df %>%
+#'   pivot_longer(-pwgtp) %>%
+#'   mutate(wtd_value = value * pwgtp) %>%
+#'   group_by(name) %>%
+#'   summarise(wtd_value = sum(wtd_value), .groups = "drop") %>%
+#'   mutate(target = wtd_value * (1 + rnorm(length(.), mean=0, sd=.1)))
+#' targets_df # in practice we'd make sure that targets make sense (e.g.,
+#'   not negative)
+#'
+#' iweights <- data_df$pwgtp
+#' targets <- targets_df$target
+#' target_names <- targets_df$name
+#'
+#' tol <- .005 * abs(targets) # use 0.5% as our tolerance
+#' xmat <- data_df %>%
+#'   # important that columns be in the same order as the targets
+#'   select(all_of(target_names)) %>%
+#'   as.matrix
+#'
+#' res <- reweight(iweights = iweights, targets = targets,
+#'                 target_names = target_names, tol = tol,
+#'                 xmat = xmat)
+#' names(res)
+#' res$solver_message
+#' res$etime
+#' res$objective
+#' res$targets_df
+#'
 #' @export
 reweight <- function(iweights,
                      targets,

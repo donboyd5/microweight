@@ -1,7 +1,73 @@
 
+library(tidyverse)
+data(acsbig)
+data(acs_targets)
+
+# let's focus on income group 5 and create and then try to hit targets for:
+#    number of records (nrecs -- to be created based on the weight, pwgtp)
+#    personal income (pincp)
+#    wages (wagp)
+#    number of people with wages (wagp_nnz -- to be created)
+#    supplemental security income (ssip)
+#    number of people with supplemental security income (ssip_nnz -- to be created)
+# we also need to get pwgtp - the person weight for each record, which will be
+#   our initial weight
+# for each "number of" variable we need to create an indicator variable that
+# defines whether it is true for that record
+
+# get the data and prepare it
+data_df <- acsbig %>%
+  filter(incgroup == 5) %>%
+  select(pwgtp, pincp, wagp, ssip) %>%
+  # create the indicator variables
+  mutate(nrecs = 1, # indicator used for number of records
+         wagp_nnz = (wagp != 0) * 1.,
+         ssip_nnz = (ssip != 0) * 1.)
+data_df # 10,000 records
+
+# prepare targets: in practice we would get them from an external source but
+# in this case we'll get actual sums on the file and perturb them randomly
+# so that targets differ from initial sums
+set.seed(1234)
+targets_df <- data_df %>%
+  pivot_longer(-pwgtp) %>%
+  mutate(wtd_value = value * pwgtp) %>%
+  group_by(name) %>%
+  summarise(wtd_value = sum(wtd_value), .groups = "drop") %>%
+  mutate(target = wtd_value * (1 + rnorm(length(.), mean=0, sd=.1)))
+targets_df # in practice we'd make sure that targets make sense (e.g., not negative)
+
+
+iweights <- data_df$pwgtp
+targets <- targets_df$target
+target_names <- targets_df$name
+
+tol <- .005 * abs(targets) # use 0.5% as our tolerance
+xmat <- data_df %>%
+  # important that they be in the same order as the targets
+  select(all_of(target_names)) %>%
+  as.matrix
+
+res <- reweight(iweights = iweights, targets = targets,
+                target_names = target_names, tol = tol,
+                xmat = xmat)
+names(res)
+res$solver_message
+res$etime
+res$objective
+res$targets_df
+
+
+glimpse(acs)
+glimpse(acs_targets)
+
+glimpse(acsbig)
+
+
+
 library(magrittr)
 library(plyr) # needed for ldply; must be loaded BEFORE dplyr
-library(tidyverse)
+
 options(tibble.print_max = 65, tibble.print_min = 65) # if more than 60 rows, print 60 - enough for states
 # ggplot2 tibble tidyr readr purrr dplyr stringr forcats
 library(scales)
