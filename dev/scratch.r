@@ -1,5 +1,160 @@
-
 library(tidyverse)
+library(microweight)
+library(alabama)
+
+# can we use alabama
+
+p <- make_problem(h=10000, s=1, k=10)
+# we'll have 30 households (30 weights) and 4 targets
+
+# break out needed components and prepare them for reweight
+iweights <- p$wh
+
+targets <- as.vector(p$targets)
+target_names <- paste0("targ", 1:length(targets))
+# the targets created by make_problem are hit exactly when using the initial
+# weights so perturb them slightly so that we have to find new weights
+set.seed(1234)
+noise <- rnorm(n=length(targets), mean = 0, sd = .03)
+targets <- targets * (1 + noise)
+
+tol <- .005 * abs(targets)
+xmat <- p$xmat
+colnames(xmat) <- target_names
+
+# eval_f_xm1sq
+# eval_grad_f_xm1sq
+# eval_h_xm1sq
+# eval_g
+# eval_jac_g
+
+cc_sparse <- get_cc_sparse(xmat, target_names, iweights)
+
+inputs <- get_inputs(iweights,
+                     targets, target_names, tol,
+                     cc_sparse,
+                     xlb=0, xub=50)
+
+heq_fn <- function(x, inputs){
+  eval_g(x, inputs) - targets
+}
+heq_fn(inputs$x0, inputs)
+
+hin_fn <- function(x, inputs){
+  c(eval_g(x, inputs) - (targets - tol),
+  (targets + tol) - eval_g(x, inputs))
+}
+hin_fn(inputs$x0, inputs)
+
+
+jac <- matrix(0, nrow=inputs$n_constraints, ncol=inputs$n_variables)
+f <- function(i){
+  rep(i, length(inputs$eval_jac_g_structure[[i]]))
+}
+iidx <- lapply(1:length(inputs$eval_jac_g_structure), f) %>% unlist
+jidx <- unlist(inputs$eval_jac_g_structure)
+indexes <- cbind(iidx, jidx)
+jac[indexes] <- inputs$cc_sparse$nzcc
+jac
+
+heq.jac_fn <- function(x, inputs){
+  jac
+}
+
+jac_hin <- rbind(jac, -jac)
+hin.jac_fn <- function(x, inputs){
+  jac_hin
+}
+
+res <- reweight(iweights = iweights, targets = targets,
+                target_names = target_names, tol = tol,
+                xmat = xmat)
+res$solver_message
+res$etime
+
+a <- proc.time()
+tmp <- alabama::auglag(par=inputs$x0,
+                       fn=eval_f_xm1sq,
+                       gr = eval_grad_f_xm1sq,
+                       # heq = heq_fn,
+                       # heq.jac = heq.jac_fn,
+                       hin = hin_fn,
+                       hin.jac = hin.jac_fn,
+                       control.outer = list(itmax = 20,
+                                            trace=TRUE,
+                                            kkt2.check=FALSE,
+                                            # mu0=.9,
+                                            # sig0=.9, # .9 worked well
+                                            # eps = 1e-8,
+                                            method="L-BFGS-B"), # "nlminb L-BFGS-B
+                       control.optim = list(trace=0, maxit=20), # , factr=1e-10, pgtol=1e-10 # inner loop, optim options
+                       inputs=inputs)
+b <- proc.time()
+b - a
+
+eval_f_xm1sq(tmp$par, inputs)
+eval_f_xm1sq(res$result$solution, inputs)
+
+(tmp$par - res$result$solution) %>% round(2)
+
+tmp$par
+res$result$solution
+
+
+
+
+a <- proc.time()
+tmp <- alabama::constrOptim.nl(par=inputs$x0,
+                               fn=eval_f_xm1sq,
+                               gr = eval_grad_f_xm1sq,
+                               # heq = heq_fn,
+                               # heq.jac = heq.jac_fn,
+                               hin = hin_fn,
+                               # hin.jac = hin.jac_fn,
+                               control.outer = list(itmax = 10,
+                                                    trace=TRUE,
+                                                    kkt2.check=FALSE,
+                                                    mu0=.9,
+                                                    sig0=.9, # .9 worked well
+                                                    eps = 1e-8,
+                                                    method="L-BFGS-B"),
+                               control.optim = list(trace=1, maxit=50), # , factr=1e-10, pgtol=1e-10
+                               inputs=inputs)
+b <- proc.time()
+b - a
+
+tmp$par
+res$result$solution
+
+eval_f_xm1sq(tmp$par, inputs)
+eval_f_xm1sq(res$result$solution, inputs)
+
+
+wfs2 <- alabama::auglag(inputs2$x0,
+                        fn=eval_f_wfs,
+                        gr = eval_grad_f_wfs,
+                        heq = heq,
+                        control.outer = list(itmax = 10,
+                                             trace=TRUE,
+                                             kkt2.check=FALSE,
+                                             # mu0=.9,
+                                             # sig0=.9, # .9 worked well
+                                             # eps = 1e-8,
+                                             method="L-BFGS-B"),
+                        control.optim = list(trace=1, maxit=50), # , factr=1e-10, pgtol=1e-10
+                        inputs=inputs2)
+
+
+
+res <- reweight(iweights = iweights, targets = targets,
+                target_names = target_names, tol = tol,
+                xmat = xmat)
+
+
+
+
+
+
 data(acsbig)
 data(acs_targets)
 
@@ -34,7 +189,7 @@ targets_df <- data_df %>%
   mutate(wtd_value = value * pwgtp) %>%
   group_by(name) %>%
   summarise(wtd_value = sum(wtd_value), .groups = "drop") %>%
-  mutate(target = wtd_value * (1 + rnorm(length(.), mean=0, sd=.1)))
+  mutate(target = wtd_value * (1 + rnorm(length(.), mean=0, sd=.02)))
 targets_df # in practice we'd make sure that targets make sense (e.g., not negative)
 
 
@@ -50,12 +205,25 @@ xmat <- data_df %>%
 
 res <- reweight(iweights = iweights, targets = targets,
                 target_names = target_names, tol = tol,
-                xmat = xmat)
+                xmat = xmat, xlb = 0.1)
 names(res)
 res$solver_message
 res$etime
 res$objective
 res$targets_df
+
+sum(iweights)
+sum(res$weights)
+
+sum(iweights==0)
+sum(res$weights==0)
+
+quantile(iweights)
+quantile(res$weights)
+quantile(res$result$solution)
+
+sort(res$result$solution, decreasing = TRUE)
+sum(res$result$solution)
 
 
 glimpse(acs)

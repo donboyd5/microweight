@@ -110,7 +110,7 @@
 #'   mutate(wtd_value = value * pwgtp) %>%
 #'   group_by(name) %>%
 #'   summarise(wtd_value = sum(wtd_value), .groups = "drop") %>%
-#'   mutate(target = wtd_value * (1 + rnorm(length(.), mean=0, sd=.1)))
+#'   mutate(target = wtd_value * (1 + rnorm(length(.), mean=0, sd=.02)))
 #' targets_df # in practice we'd make sure that targets make sense (e.g.,
 #'   not negative)
 #'
