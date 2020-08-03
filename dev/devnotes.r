@@ -60,8 +60,9 @@ usethis::use_readme_rmd()
 #.. add packages etc. to DESCRIPTION ----
 usethis::use_package("dplyr") # Defaults to imports
 usethis::use_package("ipoptr", "Suggests")
-usethis::use_package("nleqslv") # Defaults to imports
 usethis::use_package("minpack.lm") # Defaults to imports
+usethis::use_package("nleqslv") # Defaults to imports
+usethis::use_package("nloptr")
 usethis::use_package("purrr")
 usethis::use_package("rlang") # so that we can use .data I think
 usethis::use_package("stats")

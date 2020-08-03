@@ -3,6 +3,7 @@
 #****************************************************************************************************
 #                constraint evaluation and coefficient functions for ipoptr SPARSE -- same for all ####
 #****************************************************************************************************
+#' @export
 eval_g <- function(x, inputs) {
   # constraints that must hold in the solution - just give the LHS of the expression
   # return a vector where each element evaluates a constraint (i.e., sum of (x * a ccmat column), for each column)
@@ -24,6 +25,7 @@ eval_g <- function(x, inputs) {
 }
 
 
+#' @export
 eval_jac_g <- function(x, inputs){
   # the Jacobian is the matrix of first partial derivatives of constraints (these derivatives may be constants)
   # this function evaluates the Jacobian at point x
@@ -41,6 +43,7 @@ eval_jac_g <- function(x, inputs){
 }
 
 
+#' @export
 define_jac_g_structure_sparse <- function(cc_sparse, ivar="i", jvar="j"){
   # the jacobian
   # return a list that defines the non-zero structure of the "virtual" constraints coefficient matrix
@@ -128,6 +131,7 @@ eval_h_xtop <- function(x, obj_factor, hessian_lambda, inputs){
 #****************************************************************************************************
 #                (x - 1)^2 {xm1sq} -- functions for ipoptr ####
 #****************************************************************************************************
+#' @export
 eval_f_xm1sq <- function(x, inputs) {
   # objective function - evaluates to a single number
 
@@ -147,6 +151,7 @@ eval_f_xm1sq <- function(x, inputs) {
 }
 
 
+#' @export
 eval_grad_f_xm1sq <- function(x, inputs){
   # gradient of objective function - a vector length x
   # giving the partial derivatives of obj wrt each x[i]
@@ -167,6 +172,7 @@ eval_grad_f_xm1sq <- function(x, inputs){
 }
 
 
+#' @export
 eval_h_xm1sq <- function(x, obj_factor, hessian_lambda, inputs){
   # The Hessian matrix has many zero elements and so we set it up as a sparse matrix
   # We only keep the (potentially) non-zero values that run along the diagonal.

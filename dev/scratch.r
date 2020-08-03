@@ -1,10 +1,11 @@
 library(tidyverse)
 library(microweight)
-library(alabama)
+library(nloptr)
+# library(alabama)
 
 # can we use alabama
 
-p <- make_problem(h=10000, s=1, k=10)
+p <- make_problem(h=50000, s=1, k=50)
 # we'll have 30 households (30 weights) and 4 targets
 
 # break out needed components and prepare them for reweight
@@ -15,10 +16,13 @@ target_names <- paste0("targ", 1:length(targets))
 # the targets created by make_problem are hit exactly when using the initial
 # weights so perturb them slightly so that we have to find new weights
 set.seed(1234)
-noise <- rnorm(n=length(targets), mean = 0, sd = .03)
+noise <- rnorm(n=length(targets), mean = 0, sd = .05)
 targets <- targets * (1 + noise)
 
 tol <- .005 * abs(targets)
+tol[c(1, 3)] <- 0 # force some equality constraints
+tol
+# tol <- rep(0, length(targets))
 xmat <- p$xmat
 colnames(xmat) <- target_names
 
@@ -34,18 +38,11 @@ inputs <- get_inputs(iweights,
                      targets, target_names, tol,
                      cc_sparse,
                      xlb=0, xub=50)
+inputs$objscale <- length(iweights)
+inputs$gscale <- targets / 100
 
-heq_fn <- function(x, inputs){
-  eval_g(x, inputs) - targets
-}
-heq_fn(inputs$x0, inputs)
-
-hin_fn <- function(x, inputs){
-  c(eval_g(x, inputs) - (targets - tol),
-  (targets + tol) - eval_g(x, inputs))
-}
-hin_fn(inputs$x0, inputs)
-
+inputs$objscale <- 1
+inputs$gscale <- rep(1, length(targets))
 
 jac <- matrix(0, nrow=inputs$n_constraints, ncol=inputs$n_variables)
 f <- function(i){
@@ -55,100 +52,171 @@ iidx <- lapply(1:length(inputs$eval_jac_g_structure), f) %>% unlist
 jidx <- unlist(inputs$eval_jac_g_structure)
 indexes <- cbind(iidx, jidx)
 jac[indexes] <- inputs$cc_sparse$nzcc
-jac
+jac_bak <- jac
+# jac
 
-heq.jac_fn <- function(x, inputs){
-  jac
+jac_scaled <- sweep(jac, MARGIN=1, FUN="/", STATS=inputs$gscale)
+# jac[1:5, 1:8]
+# inputs$gscale[1:5]
+# jac_scaled[1:5, 1:8]
+jac <- jac_scaled
+
+jac_heq <- jac[inputs$i_heq, ]
+# jac_hin <- rbind(jac[inputs$i_hin, ], -jac[inputs$i_hin, ])
+jac_hin <- rbind(-jac[inputs$i_hin, ], jac[inputs$i_hin, ])
+
+
+# scale evalg
+evg_scaled <- function(x, inputs){
+  eval_g(x, inputs) / inputs$gscale
 }
 
-jac_hin <- rbind(jac, -jac)
+
+heq_fn <- function(x, inputs){
+  evg_scaled(x, inputs)[inputs$i_heq] - targets[inputs$i_heq] / inputs$gscale[inputs$i_heq]
+}
+heq_fn(inputs$x0, inputs)
+
+
+hin_fn <- function(x, inputs){
+  # NLopt always expects constraints to be of the form myconstraint (x) ≤ 0,
+  g <- evg_scaled(x, inputs)[inputs$i_hin]
+
+  c(inputs$clb[inputs$i_hin]  / inputs$gscale[inputs$i_hin] - g,
+    g - inputs$cub[inputs$i_hin]  / inputs$gscale[inputs$i_hin])
+}
+hin_fn(inputs$x0, inputs)
+
+
+
+heq.jac_fn <- function(x, inputs){
+  jac_heq
+}
+
+heq.jac_fn <- function(x, inputs){
+  jac_heq
+}
+
 hin.jac_fn <- function(x, inputs){
   jac_hin
 }
 
+inputs$clb[inputs$i_hin]; inputs$cub[inputs$i_hin]
+eval_g(inputs$x0, inputs)[inputs$i_hin]
+
 res <- reweight(iweights = iweights, targets = targets,
                 target_names = target_names, tol = tol,
-                xmat = xmat)
+                xmat = xmat, method="ipopt")
 res$solver_message
 res$etime
+res$objective
 
 a <- proc.time()
-tmp <- alabama::auglag(par=inputs$x0,
-                       fn=eval_f_xm1sq,
-                       gr = eval_grad_f_xm1sq,
-                       # heq = heq_fn,
-                       # heq.jac = heq.jac_fn,
-                       hin = hin_fn,
-                       hin.jac = hin.jac_fn,
-                       control.outer = list(itmax = 20,
-                                            trace=TRUE,
-                                            kkt2.check=FALSE,
-                                            # mu0=.9,
-                                            # sig0=.9, # .9 worked well
-                                            # eps = 1e-8,
-                                            method="L-BFGS-B"), # "nlminb L-BFGS-B
-                       control.optim = list(trace=0, maxit=20), # , factr=1e-10, pgtol=1e-10 # inner loop, optim options
-                       inputs=inputs)
+tmp <- nloptr(x0=tmp2$solution, # x0=inputs$x0, # x0=tmp$solution,
+               eval_f=eval_f_xm1sq,
+               eval_grad_f = eval_grad_f_xm1sq,
+               lb = inputs$xlb, ub = inputs$xub,
+               eval_g_ineq = hin_fn, # hin_fn_nlopt
+               eval_jac_g_ineq = hin.jac_fn, # hin.jac_fn_nlopt
+               eval_g_eq = heq_fn,
+               eval_jac_g_eq = heq.jac_fn,
+               opts = list(algorithm="NLOPT_LD_AUGLAG", # NLOPT_LD_AUGLAG_EQ NLOPT_LD_AUGLAG
+                           # xtol_rel=1.0e-6,
+                           ftol_rel=1.0e-4,
+                           maxeval = 5000,
+                           print_level = 1,
+                           # nlopt_set_vector_storage=1e6,
+                           local_opts = list(algorithm="NLOPT_LD_LBFGS", # NLOPT_LD_LBFGS NLOPT_LD_LBFGS NLOPT_LD_SLSQP (SLOW)
+                                             xtol_rel  = 1.0e-4)),
+               inputs = inputs)
 b <- proc.time()
 b - a
 
-eval_f_xm1sq(tmp$par, inputs)
+# nloptr.print.options()
+# https://nlopt.readthedocs.io/en/latest/NLopt_Algorithms/#local-gradient-based-optimization
+#  ?'nloptr-package'
+tmpbak <- tmp
+tmp2 <- tmp
+
+# names(tmp2)
+tmp2$message
+tmp2$objective
+tmp2$iterations
+tmp2$num_constraints_eq
+tmp2$num_constraints_ineq
+# outer: NLOPT_LD_AUGLAG, NLOPT_LD_AUGLAG_EQ, NLOPT_LD_SLSQP
+# NLOPT_LD_SLSQP does not require local optimizer; TOO LONG
+
+
 eval_f_xm1sq(res$result$solution, inputs)
+# eval_f_xm1sq(tmp$par, inputs)
+eval_f_xm1sq(tmp2$solution, inputs)
 
-(tmp$par - res$result$solution) %>% round(2)
+# targets
+inputs$clb; inputs$cub
+eval_g(res$result$solution, inputs)
+# eval_g(tmp$par, inputs)
+eval_g(tmp2$solution, inputs)
 
-tmp$par
-res$result$solution
+(eval_g(tmp2$solution, inputs) / eval_g(res$result$solution, inputs) * 100 - 100) %>% round(2)
+(eval_g(tmp2$solution, inputs) / targets * 100 - 100) %>% round(5)
 
+# cor(tmp$par, res$result$solution)
+cor(tmp2$solution, res$result$solution)
 
-
-
-a <- proc.time()
-tmp <- alabama::constrOptim.nl(par=inputs$x0,
-                               fn=eval_f_xm1sq,
-                               gr = eval_grad_f_xm1sq,
-                               # heq = heq_fn,
-                               # heq.jac = heq.jac_fn,
-                               hin = hin_fn,
-                               # hin.jac = hin.jac_fn,
-                               control.outer = list(itmax = 10,
-                                                    trace=TRUE,
-                                                    kkt2.check=FALSE,
-                                                    mu0=.9,
-                                                    sig0=.9, # .9 worked well
-                                                    eps = 1e-8,
-                                                    method="L-BFGS-B"),
-                               control.optim = list(trace=1, maxit=50), # , factr=1e-10, pgtol=1e-10
-                               inputs=inputs)
-b <- proc.time()
-b - a
-
-tmp$par
-res$result$solution
-
-eval_f_xm1sq(tmp$par, inputs)
-eval_f_xm1sq(res$result$solution, inputs)
+# (tmp$par - res$result$solution) %>% round(2)
+(tmp2$solution - res$result$solution) %>% round(2)
 
 
-wfs2 <- alabama::auglag(inputs2$x0,
-                        fn=eval_f_wfs,
-                        gr = eval_grad_f_wfs,
-                        heq = heq,
-                        control.outer = list(itmax = 10,
-                                             trace=TRUE,
-                                             kkt2.check=FALSE,
-                                             # mu0=.9,
-                                             # sig0=.9, # .9 worked well
-                                             # eps = 1e-8,
-                                             method="L-BFGS-B"),
-                        control.optim = list(trace=1, maxit=50), # , factr=1e-10, pgtol=1e-10
-                        inputs=inputs2)
+# d <- check.derivatives(inputs$x0,
+#                        func=eval_f_xm1sq,
+#                        func_grad=eval_grad_f_xm1sq,
+#                        check_derivatives_tol = 1e-04,
+#                        check_derivatives_print = "errors",
+#                        func_grad_name = "grad_f",
+#                        inputs=inputs)
+
+# library(numDeriv)
+# j <- jacobian(func=evg_scaled, x=inputs$x0, inputs=inputs)
+# dim(j)
+# ivals <- 1:5
+# jvals <- 1:8
+#
+# j[ivals, jvals]
+# jac_scaled[ivals, jvals]
+# sum((j - jac_scaled)^2)
+
+# j <- jacobian(func=hin_fn, x=inputs$x0, inputs=inputs)
+# dim(j)
+# ivals <- 1:6
+# jvals <- 1:8
+#
+# j[ivals, jvals]
+# jac_hin[ivals, jvals]
+# sum((j - jac_hin)^2)
 
 
 
-res <- reweight(iweights = iweights, targets = targets,
-                target_names = target_names, tol = tol,
-                xmat = xmat)
+# a <- proc.time()
+# tmp <- alabama::auglag(par=inputs$x0,
+#                        fn=eval_f_xm1sq,
+#                        gr = eval_grad_f_xm1sq,
+#                        heq = heq_fn,
+#                        heq.jac = heq.jac_fn,
+#                        hin = hin_fn,
+#                        hin.jac = hin.jac_fn,
+#                        control.outer = list(itmax = 100,
+#                                             trace=TRUE,
+#                                             kkt2.check=FALSE,
+#                                             # mu0=.9,
+#                                             # sig0=.9, # .9 worked well
+#                                             # eps = 1e-8,
+#                                             method="nlminb"), # "nlminb L-BFGS-B
+#                        control.optim = list(trace=0, maxit=20), # , factr=1e-10, pgtol=1e-10 # inner loop, optim options
+#                        inputs=inputs)
+# b <- proc.time()
+# b - a
+
 
 
 

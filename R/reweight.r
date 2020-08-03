@@ -5,8 +5,7 @@
 #' Calculate new weights for each household in a microdata file
 #' so that (1) selected variables, weighted with the new weights and summed, hit
 #' or come close to desired targets, and (2) a measure of distortion based on
-#' how much the new weights are changed from an initial set of weights is
-#' minimized.
+#' how much the new weights differ from an initial set of weights is minimized.
 #'
 #'
 #' @param iweights Numeric vector of initial household weights, length h.
@@ -142,10 +141,12 @@ reweight <- function(iweights,
                      xlb=0,
                      xub=50,
                      maxiter = 50,
-                     optlist = NULL){
+                     optlist = NULL,
+                     method="auglag"){
 
   # stopifnot(all(!is.na(x$eval_jac_g(x$x0))))
   # stopifnot(is.function(x$eval_f))
+  run_input_checks(method)
   if(!is.null(optlist)){ # check options list
     if(optlist$file_print_level > 0) {
       stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(optlist$output_file))
@@ -228,8 +229,20 @@ reweight <- function(iweights,
 }
 
 
+run_input_checks <- function(method){
+  stopifnot(method %in% c("auglag", "ipopt"))
+  if(method == "auglag"){
+    print("all good auglag")
+  } else if(method == "ipopt") {
+    print("all good ipopt")
+  }
+}
+
+
+
 # Create sparse constraints coefficients data frame
-# @keyword internal
+# # @keyword internal
+#' @export
 get_cc_sparse <- function(xmat, target_names, iweights) {
   #.. dense matrix of constraint coefficients for the nation
   cc_sparse <- tidyr::as_tibble(xmat) %>%
@@ -249,7 +262,8 @@ get_cc_sparse <- function(xmat, target_names, iweights) {
 }
 
 # Get inputs
-# @keyword internal
+# # @keyword internal
+#' @export
 get_inputs <- function(iweights,
                        targets,
                        target_names,
@@ -266,6 +280,8 @@ get_inputs <- function(iweights,
   inputs$n_constraints <- length(inputs$constraints)
   inputs$clb <- targets - tol
   inputs$cub <- targets + tol
+  inputs$i_heq <- which(tol==0)
+  inputs$i_hin <- which(tol!=0)
 
   # finally, add xlb, xub, x0, and the relevant structures
   inputs$xlb <- rep(xlb, inputs$n_variables)
@@ -280,3 +296,4 @@ get_inputs <- function(iweights,
 
   inputs
 }
+
