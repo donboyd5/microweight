@@ -13,7 +13,8 @@ reweight(
   xlb = 0,
   xub = 50,
   maxiter = 50,
-  optlist = NULL
+  optlist = NULL,
+  method = "auglag"
 )
 }
 \arguments{
@@ -58,8 +59,7 @@ suffix pdiff indicates the percent difference from a target.}
 Calculate new weights for each household in a microdata file
 so that (1) selected variables, weighted with the new weights and summed, hit
 or come close to desired targets, and (2) a measure of distortion based on
-how much the new weights are changed from an initial set of weights is
-minimized.
+how much the new weights differ from an initial set of weights is minimized.
 }
 \details{
 \code{reweight} uses the \href{https://coin-or.github.io/Ipopt/}{IPOPT
@@ -149,7 +149,8 @@ xmat <- data_df \%>\%
 
 res <- reweight(iweights = iweights, targets = targets,
                 target_names = target_names, tol = tol,
-                xmat = xmat)
+                xmat = xmat,
+                method = "ipopt")
 names(res)
 res$solver_message
 res$etime

@@ -125,7 +125,8 @@
 #'
 #' res <- reweight(iweights = iweights, targets = targets,
 #'                 target_names = target_names, tol = tol,
-#'                 xmat = xmat)
+#'                 xmat = xmat,
+#'                 method = "ipopt")
 #' names(res)
 #' res$solver_message
 #' res$etime
@@ -144,36 +145,11 @@ reweight <- function(iweights,
                      optlist = NULL,
                      method="auglag"){
 
-  # stopifnot(all(!is.na(x$eval_jac_g(x$x0))))
-  # stopifnot(is.function(x$eval_f))
-  run_input_checks(method)
-  if(!is.null(optlist)){ # check options list
-    if(optlist$file_print_level > 0) {
-      stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(optlist$output_file))
-    }
-  }
+  stopifnot(method %in% c("auglag", "ipopt"))
 
+  # check_args(method)
 
   t1 <- proc.time()
-
-  # define ipopt options
-  if(!is.null(maxiter) & !(is.null(optlist))) {
-    print("CAUTION: maxiter and opts both supplied. maxiter will override any iteration limit included in optlist.")
-  }
-
-  opts <- list(print_level = 0,
-               file_print_level = 0, # integer
-               max_iter= maxiter,
-               linear_solver = "ma27", # mumps pardiso ma27 ma57 ma77 ma86 ma97
-               jac_c_constant = "yes", # does not improve on moderate problems equality constraints
-               jac_d_constant = "yes", # does not improve on  moderate problems inequality constraints
-               hessian_constant = "yes") # KEEP default NO - if yes Ipopt asks for Hessian of Lagrangian function only once and reuses; default "no"
-               # output_file = NULL)
-
-  # update default list just defined with any options specified in
-  opts <- purrr::list_modify(opts, !!!optlist)
-  if(!is.null(maxiter)) opts$max_iter <- maxiter # give priority to directly passed maxiter
-
   cc_sparse <- get_cc_sparse(xmat, target_names, iweights)
 
   inputs <- get_inputs(iweights,
@@ -181,22 +157,30 @@ reweight <- function(iweights,
                        cc_sparse,
                        xlb, xub)
 
-  result <- ipoptr::ipoptr(x0 = inputs$x0,
-                   lb = inputs$xlb,
-                   ub = inputs$xub,
-                   eval_f = eval_f_xm1sq, # arguments: x, inputs; eval_f_xtop eval_f_xm1sq
-                   eval_grad_f = eval_grad_f_xm1sq, # eval_grad_f_xtop eval_grad_f_xm1sq
-                   eval_g = eval_g, # constraints LHS - a vector of values
-                   eval_jac_g = eval_jac_g,
-                   eval_jac_g_structure = inputs$eval_jac_g_structure,
-                   eval_h = eval_h_xm1sq, # the hessian is essential for this problem eval_h_xtop eval_h_xm1sq
-                   eval_h_structure = inputs$eval_h_structure,
-                   constraint_lb = inputs$clb,
-                   constraint_ub = inputs$cub,
-                   opts = opts,
-                   inputs = inputs)
+  if(method == "auglag") {
+    result <- call_auglag(iweights,
+                          targets,
+                          target_names,
+                          tol,
+                          xmat,
+                          xlb,
+                          xub,
+                          maxiter,
+                          optlist,
+                          inputs)
+    } else if(method == "ipopt") {
+      result <- call_ipopt(iweights,
+                           targets,
+                           target_names,
+                           tol,
+                           xmat,
+                           xlb,
+                           xub,
+                           maxiter,
+                           optlist,
+                           inputs)
+  }
   t2 <- proc.time()
-
 
   # define additional values to be returned
   solver_message <- result$message
@@ -229,13 +213,74 @@ reweight <- function(iweights,
 }
 
 
-run_input_checks <- function(method){
-  stopifnot(method %in% c("auglag", "ipopt"))
-  if(method == "auglag"){
-    print("all good auglag")
-  } else if(method == "ipopt") {
-    print("all good ipopt")
+call_ipopt <- function(iweights,
+                       targets,
+                       target_names,
+                       tol,
+                       xmat,
+                       xlb,
+                       xub,
+                       maxiter,
+                       optlist,
+                       inputs){
+  # check inputs
+  if(!is.null(maxiter) & !(is.null(optlist))) {
+    print("CAUTION: maxiter and opts both supplied. maxiter will override any iteration limit included in optlist.")
   }
+
+  if(!is.null(optlist)){ # check options list
+    if(optlist$file_print_level > 0) {
+      stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(optlist$output_file))
+    }
+  }
+
+  # define ipopt options
+  opts <- list(print_level = 0,
+               file_print_level = 0, # integer
+               max_iter= maxiter,
+               linear_solver = "ma27", # mumps pardiso ma27 ma57 ma77 ma86 ma97
+               jac_c_constant = "yes", # does not improve on moderate problems equality constraints
+               jac_d_constant = "yes", # does not improve on  moderate problems inequality constraints
+               hessian_constant = "yes") # KEEP default NO - if yes Ipopt asks for Hessian of Lagrangian function only once and reuses; default "no"
+  # output_file = NULL)
+
+  # update default list just defined with any options specified in
+  opts <- purrr::list_modify(opts, !!!optlist)
+  if(!is.null(maxiter)) opts$max_iter <- maxiter # give priority to directly passed maxiter
+
+  result <- ipoptr::ipoptr(x0 = inputs$x0,
+                           lb = inputs$xlb,
+                           ub = inputs$xub,
+                           eval_f = eval_f_xm1sq, # arguments: x, inputs; eval_f_xtop eval_f_xm1sq
+                           eval_grad_f = eval_grad_f_xm1sq, # eval_grad_f_xtop eval_grad_f_xm1sq
+                           eval_g = eval_g, # constraints LHS - a vector of values
+                           eval_jac_g = eval_jac_g,
+                           eval_jac_g_structure = inputs$eval_jac_g_structure,
+                           eval_h = eval_h_xm1sq, # the hessian is essential for this problem eval_h_xtop eval_h_xm1sq
+                           eval_h_structure = inputs$eval_h_structure,
+                           constraint_lb = inputs$clb,
+                           constraint_ub = inputs$cub,
+                           opts = opts,
+                           inputs = inputs)
+  result
+}
+
+
+call_auglag <- function(iweights,
+                        targets,
+                        target_names,
+                        tol,
+                        xmat,
+                        xlb,
+                        xub,
+                        maxiter,
+                        optlist,
+                        inputs){
+  # check inputs
+
+  # add inputs needed for auglag
+
+  # define auglag options
 }
 
 
