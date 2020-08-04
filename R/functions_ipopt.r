@@ -16,8 +16,8 @@ eval_g <- function(x, inputs) {
   #   nzcc
 
   constraint_tbl <- inputs$cc_sparse %>%
-    dplyr::group_by(i) %>%
-    dplyr::summarise(constraint_value=sum(nzcc * x[j]),
+    dplyr::group_by(.data$i) %>%
+    dplyr::summarise(constraint_value=sum(.data$nzcc * x[.data$j]),
               .groups="keep")
   # the column constraint_value is a vector, in the order we want
 

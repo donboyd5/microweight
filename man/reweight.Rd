@@ -14,7 +14,8 @@ reweight(
   xub = 50,
   maxiter = 50,
   optlist = NULL,
-  method = "auglag"
+  method = "auglag",
+  quiet = TRUE
 )
 }
 \arguments{
@@ -39,6 +40,10 @@ initial weights. Default is 50.}
 
 \item{optlist}{Named list of allowable
 \href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options}.}
+
+\item{method}{"auglag" (default) or "ipopt" (requires installation of ipoptr)}
+
+\item{quiet}{TRUE (default) or FALSE}
 }
 \value{
 A list with the following elements:
@@ -91,11 +96,25 @@ tol <- .005 * abs(targets)
 xmat <- p$xmat
 colnames(xmat) <- target_names
 
-res <- reweight(iweights = iweights, targets = targets,
-                target_names = target_names, tol = tol,
-                xmat = xmat)
+res <- reweight(iweights = iweights,
+                targets = targets,
+                target_names = target_names,
+                tol = tol,
+                xmat = xmat,
+                method="ipopt")
+res$etime
+res$objective_unscaled
+res$targets_df
 
-res
+res2 <- reweight(iweights = iweights,
+                 targets = targets,
+                 target_names = target_names,
+                 tol = tol,
+                 xmat = xmat,
+                 method="auglag")
+res2$etime
+res2$objective_unscaled
+res2$targets_df
 
 # Example 2: Determine new weights for a small problem using ACS data
 library(tidyverse)
@@ -108,9 +127,9 @@ data(acs_targets)
 #    number of people with wages (wagp_nnz -- to be created)
 #    supplemental security income (ssip)
 #    number of people with supplemental security income (ssip_nnz -- to
-       be created)
+#       be created)
 # we also need to get pwgtp - the person weight for each record, which
-       will be our initial weight
+#       will be our initial weight
 # for each "number of" variable we need to create an indicator variable that
 # defines whether it is true for that record
 
@@ -134,8 +153,8 @@ targets_df <- data_df \%>\%
   group_by(name) \%>\%
   summarise(wtd_value = sum(wtd_value), .groups = "drop") \%>\%
   mutate(target = wtd_value * (1 + rnorm(length(.), mean=0, sd=.02)))
-targets_df # in practice we'd make sure that targets make sense (e.g.,
-  not negative)
+# in practice we'd make sure that targets make sense (e.g., not negative)
+targets_df
 
 iweights <- data_df$pwgtp
 targets <- targets_df$target
@@ -156,5 +175,12 @@ res$solver_message
 res$etime
 res$objective
 res$targets_df
+
+res2 <- reweight(iweights = iweights, targets = targets,
+                target_names = target_names, tol = tol,
+                xmat = xmat,
+                method="auglag")
+res2
+res2$etime
 
 }

@@ -21,6 +21,8 @@
 #' @param maxiter Integer value for maximum number of iterations. Default is 50.
 #' @param optlist Named list of allowable
 #'   \href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options}.
+#' @param method "auglag" (default) or "ipopt" (requires installation of ipoptr)
+#' @param quiet TRUE (default) or FALSE
 #'
 #' @returns A list with the following elements:
 #'
@@ -66,11 +68,25 @@
 #' xmat <- p$xmat
 #' colnames(xmat) <- target_names
 #'
-#' res <- reweight(iweights = iweights, targets = targets,
-#'                 target_names = target_names, tol = tol,
-#'                 xmat = xmat)
+#' res <- reweight(iweights = iweights,
+#'                 targets = targets,
+#'                 target_names = target_names,
+#'                 tol = tol,
+#'                 xmat = xmat,
+#'                 method="ipopt")
+#' res$etime
+#' res$objective_unscaled
+#' res$targets_df
 #'
-#' res
+#' res2 <- reweight(iweights = iweights,
+#'                  targets = targets,
+#'                  target_names = target_names,
+#'                  tol = tol,
+#'                  xmat = xmat,
+#'                  method="auglag")
+#' res2$etime
+#' res2$objective_unscaled
+#' res2$targets_df
 #'
 #' # Example 2: Determine new weights for a small problem using ACS data
 #' library(tidyverse)
@@ -84,9 +100,9 @@
 #' #    number of people with wages (wagp_nnz -- to be created)
 #' #    supplemental security income (ssip)
 #' #    number of people with supplemental security income (ssip_nnz -- to
-#'        be created)
+#' #       be created)
 #' # we also need to get pwgtp - the person weight for each record, which
-#'        will be our initial weight
+#' #       will be our initial weight
 #' # for each "number of" variable we need to create an indicator variable that
 #' # defines whether it is true for that record
 #'
@@ -110,8 +126,8 @@
 #'   group_by(name) %>%
 #'   summarise(wtd_value = sum(wtd_value), .groups = "drop") %>%
 #'   mutate(target = wtd_value * (1 + rnorm(length(.), mean=0, sd=.02)))
-#' targets_df # in practice we'd make sure that targets make sense (e.g.,
-#'   not negative)
+#' # in practice we'd make sure that targets make sense (e.g., not negative)
+#' targets_df
 #'
 #' iweights <- data_df$pwgtp
 #' targets <- targets_df$target
@@ -133,6 +149,13 @@
 #' res$objective
 #' res$targets_df
 #'
+#' res2 <- reweight(iweights = iweights, targets = targets,
+#'                 target_names = target_names, tol = tol,
+#'                 xmat = xmat,
+#'                 method="auglag")
+#' res2
+#' res2$etime
+#'
 #' @export
 reweight <- function(iweights,
                      targets,
@@ -143,11 +166,17 @@ reweight <- function(iweights,
                      xub=50,
                      maxiter = 50,
                      optlist = NULL,
-                     method="auglag"){
+                     method = "auglag",
+                     quiet = TRUE){
+
+  # document these:
+  # 'define_jac_g_structure_sparse' 'eval_f_xm1sq' 'eval_g'
+  # 'eval_grad_f_xm1sq' 'eval_h_xm1sq' 'eval_jac_g' 'get_cc_sparse'
+  # 'get_inputs'
 
   stopifnot(method %in% c("auglag", "ipopt"))
 
-  # check_args(method)
+  check_args(method)
 
   t1 <- proc.time()
   cc_sparse <- get_cc_sparse(xmat, target_names, iweights)
@@ -157,8 +186,8 @@ reweight <- function(iweights,
                        cc_sparse,
                        xlb, xub)
 
-  if(method == "auglag") {
-    result <- call_auglag(iweights,
+  if(method == "auglag"){
+    output <- call_auglag(iweights,
                           targets,
                           target_names,
                           tol,
@@ -167,9 +196,10 @@ reweight <- function(iweights,
                           xub,
                           maxiter,
                           optlist,
+                          quiet,
                           inputs)
     } else if(method == "ipopt") {
-      result <- call_ipopt(iweights,
+      output <- call_ipopt(iweights,
                            targets,
                            target_names,
                            tol,
@@ -178,38 +208,69 @@ reweight <- function(iweights,
                            xub,
                            maxiter,
                            optlist,
+                           quiet,
                            inputs)
   }
   t2 <- proc.time()
 
   # define additional values to be returned
-  solver_message <- result$message
+  # solver_message <- result$message
   etime <- t2 - t1
-  objective <- result$objective
-  weights <- iweights * result$solution
+
+  # use if statements below, even though not needed, in case result names change
+  if(method == "auglag"){
+    objective_unscaled <- output$result$objective * output$inputs$objscale
+    weights <- iweights * output$result$solution
+    xfinal <- output$result$solution
+
+  } else if(method == "ipopt"){
+    objective_unscaled <- output$result$objective * output$inputs$objscale
+    weights <- iweights * output$result$solution
+    xfinal <- output$result$solution
+  }
 
   targets_df <- tibble::tibble(targnum = 1:length(targets),
                        targname = target_names,
                        target = targets) %>%
     dplyr::mutate(targinit = eval_g(inputs$x0, inputs),
-           targcalc = result$constraints,
-           targinit_diff = targinit - target,
+           targcalc = eval_g(xfinal, inputs),
+           targinit_diff = .data$targinit - .data$target,
            targtol = tol,
-           targcalc_diff = targcalc - target,
-           targinit_pdiff = targinit_diff / target * 100,
-           targtol_pdiff = abs(targtol / target) * 100,
-           targcalc_pdiff = targcalc_diff / target * 100)
+           targcalc_diff = .data$targcalc - .data$target,
+           targinit_pdiff = .data$targinit_diff / .data$target * 100,
+           targtol_pdiff = abs(.data$targtol / .data$target) * 100,
+           targcalc_pdiff = .data$targcalc_diff / .data$target * 100)
 
-  keepnames <- c("solver_message",
-                 "etime",
-                 "objective",
+  keepnames <- c("etime",
+                 "objective_unscaled",
                  "weights",
-                 "targets_df",
-                 "result")
-  output <- list()
+                 "xfinal",
+                 "targets_df")
+  # output <- list()
   for(var in keepnames) output[[var]] <- get(var)
+  # reorder the list
+  ordered_names <- c(keepnames, "result", "opts", "inputs")
+  output <- output[ordered_names]
 
   output
+}
+
+
+check_args <- function(method){
+  if(method == "auglag"){
+    print("auglag check arguments")
+  } else if(method == "ipopt"){
+  #   if(!is.null(maxiter) & !(is.null(optlist))) {
+  #     print("CAUTION: maxiter and opts both supplied. maxiter will override any iteration limit included in optlist.")
+  #   }
+  #   if(!is.null(optlist)){ # check options list
+  #     if(optlist$file_print_level > 0) {
+  #       stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(optlist$output_file))
+  #     }
+  #   }
+  # }
+    print("ipopt check")
+  }
 }
 
 
@@ -222,17 +283,9 @@ call_ipopt <- function(iweights,
                        xub,
                        maxiter,
                        optlist,
+                       quiet,
                        inputs){
   # check inputs
-  if(!is.null(maxiter) & !(is.null(optlist))) {
-    print("CAUTION: maxiter and opts both supplied. maxiter will override any iteration limit included in optlist.")
-  }
-
-  if(!is.null(optlist)){ # check options list
-    if(optlist$file_print_level > 0) {
-      stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(optlist$output_file))
-    }
-  }
 
   # define ipopt options
   opts <- list(print_level = 0,
@@ -262,7 +315,12 @@ call_ipopt <- function(iweights,
                            constraint_ub = inputs$cub,
                            opts = opts,
                            inputs = inputs)
-  result
+
+  output <- list()
+  output$inputs <- inputs
+  output$opts <- opts
+  output$result <- result
+  output
 }
 
 
@@ -275,12 +333,58 @@ call_auglag <- function(iweights,
                         xub,
                         maxiter,
                         optlist,
+                        quiet,
                         inputs){
   # check inputs
 
   # add inputs needed for auglag
+  inputs$objscale <- length(iweights)
+  inputs$gscale <- targets / 10
+  # inputs$objscale <- 1
+  # inputs$gscale <- rep(1, length(targets))
 
-  # define auglag options
+  jac <- matrix(0, nrow=inputs$n_constraints, ncol=inputs$n_variables)
+  f <- function(i){
+    rep(i, length(inputs$eval_jac_g_structure[[i]]))
+  }
+  iidx <- lapply(1:length(inputs$eval_jac_g_structure), f) %>% unlist
+  jidx <- unlist(inputs$eval_jac_g_structure)
+  indexes <- cbind(iidx, jidx)
+  jac[indexes] <- inputs$cc_sparse$nzcc
+
+  jac_scaled <- sweep(jac, MARGIN=1, FUN="/", STATS=inputs$gscale)
+  jac <- jac_scaled
+
+  inputs$jac_heq <- jac[inputs$i_heq, ]
+  inputs$jac_hin <- rbind(-jac[inputs$i_hin, ], jac[inputs$i_hin, ])
+
+  local_opts <- list()
+  local_opts$algorithm <- "NLOPT_LD_LBFGS"
+  local_opts$xtol_rel <- 1.0e-4
+
+  opts <- list()
+  opts$algorithm <- "NLOPT_LD_AUGLAG"
+  opts$ftol_rel <- 1.0e-4
+  opts$maxeval <-  5000
+  opts$print_level <- 0
+  opts$local_opts <- local_opts
+
+  result <- nloptr::nloptr(x0=inputs$x0,
+                eval_f=eval_f_xm1sq,
+                eval_grad_f = eval_grad_f_xm1sq,
+                lb = inputs$xlb, ub = inputs$xub,
+                eval_g_ineq = hin_fn,
+                eval_jac_g_ineq = hin.jac_fn,
+                eval_g_eq = heq_fn,
+                eval_jac_g_eq = heq.jac_fn,
+                opts = opts,
+                inputs = inputs)
+
+  output <- list()
+  output$inputs <- inputs
+  output$opts <- opts
+  output$result <- result
+  output
 }
 
 
@@ -297,11 +401,11 @@ get_cc_sparse <- function(xmat, target_names, iweights) {
     tidyr::pivot_longer(cols = dplyr::all_of(target_names),
                  names_to="cname",
                  values_to = "value") %>%
-    dplyr::mutate(nzcc = iweight * value) %>%
-    dplyr::filter(nzcc != 0) %>%
-    dplyr::mutate(i=match(cname, target_names)) %>%
-    dplyr::select(i, j, cname, nzcc, iweight, value) %>%
-    dplyr::arrange(i, j) # this ordering is crucial for the Jacobian
+    dplyr::mutate(nzcc = .data$iweight * .data$value) %>%
+    dplyr::filter(.data$nzcc != 0) %>%
+    dplyr::mutate(i=match(.data$cname, target_names)) %>%
+    dplyr::select(.data$i, .data$j, .data$cname, .data$nzcc, .data$iweight, .data$value) %>%
+    dplyr::arrange(.data$i, .data$j) # this ordering is crucial for the Jacobian
 
   return(cc_sparse)
 }
@@ -342,3 +446,38 @@ get_inputs <- function(iweights,
   inputs
 }
 
+
+# functions for nloptr
+evg_scaled <- function(x, inputs){
+  eval_g(x, inputs) / inputs$gscale
+}
+
+
+heq_fn <- function(x, inputs){
+  evg_scaled(x, inputs)[inputs$i_heq] - inputs$targets[inputs$i_heq] / inputs$gscale[inputs$i_heq]
+}
+
+hin_fn <- function(x, inputs){
+  # NLopt always expects constraints to be of the form myconstraint (x) ≤ 0,
+  g <- evg_scaled(x, inputs)[inputs$i_hin]
+
+  c(inputs$clb[inputs$i_hin]  / inputs$gscale[inputs$i_hin] - g,
+    g - inputs$cub[inputs$i_hin]  / inputs$gscale[inputs$i_hin])
+}
+
+
+heq.jac_fn <- function(x, inputs){
+  inputs$jac_heq
+}
+
+
+hin.jac_fn <- function(x, inputs){
+  inputs$jac_hin
+}
+
+
+# Note that in the main package file, I have: @import dplyr so that we can access dplyr functions
+# Throughout this file, the use of dplyr will generate a "no visible binding for global variable"
+# note. However, it is not an error - it is ok.
+# use .data$ before the variables that offend
+# must  @importFrom rlang .data

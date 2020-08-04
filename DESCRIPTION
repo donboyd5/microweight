@@ -13,16 +13,17 @@ Encoding: UTF-8
 LazyData: true
 Imports: 
     dplyr,
-    ipoptr,
     magrittr,
     minpack.lm,
     nleqslv,
     nloptr,
+    plyr,
     purrr,
     rlang,
     stats,
     tibble,
-    tidyr
+    tidyr,
+    tidyverse
 RoxygenNote: 7.1.1
 Depends: 
     R (>= 2.10)
