@@ -29,8 +29,10 @@
 #' \describe{
 #' \item{solver_message}{The message produced by IPOPT. See
 #' \href{https://coin-or.github.io/Ipopt/OUTPUT.html}{IPOPT output}.}
-#' \item{etime}{Elapsed time.} \item{objective}{The objective function value at
-#' the solution.} \item{weights}{Numeric vector of new weights.}
+#' \item{etime}{Elapsed time.}
+#'  \item{objective}{The objective function value at
+#' the solution.}
+#' \item{weights}{Numeric vector of new weights.}
 #' \item{targets_df}{Data frame with target names and values, values at the
 #' starting point, values at the solution, tolerances, differences, and percent
 #' differences. The suffix diff indicates the difference from a target and the
@@ -153,8 +155,11 @@
 #'                 target_names = target_names, tol = tol,
 #'                 xmat = xmat,
 #'                 method="auglag")
-#' res2
+#' names(res2)
+#' res2$solver_message
 #' res2$etime
+#' res2$objective
+#' res2$targets_df
 #'
 #' @export
 reweight <- function(iweights,
@@ -219,11 +224,13 @@ reweight <- function(iweights,
 
   # use if statements below, even though not needed, in case result names change
   if(method == "auglag"){
+    solver_message <- output$result$message
     objective_unscaled <- output$result$objective * output$inputs$objscale
     weights <- iweights * output$result$solution
     xfinal <- output$result$solution
 
   } else if(method == "ipopt"){
+    solver_message <- output$result$message
     objective_unscaled <- output$result$objective * output$inputs$objscale
     weights <- iweights * output$result$solution
     xfinal <- output$result$solution
@@ -241,7 +248,8 @@ reweight <- function(iweights,
            targtol_pdiff = abs(.data$targtol / .data$target) * 100,
            targcalc_pdiff = .data$targcalc_diff / .data$target * 100)
 
-  keepnames <- c("etime",
+  keepnames <- c("solver_message",
+                 "etime",
                  "objective_unscaled",
                  "weights",
                  "xfinal",
@@ -388,9 +396,46 @@ call_auglag <- function(iweights,
 }
 
 
-
-# Create sparse constraints coefficients data frame
-# # @keyword internal
+#' Create Sparse Constraints Coefficients Data Frame.
+#'
+#' Construct a data frame that represents a sparse matrix with nonzero
+#' constraint coefficients. A constraint coefficient is the amount by which a
+#' constraint changes if an element of the vector `x` changes by one unit. This
+#' stores only those coefficients that are nonzero, in triplet form, where `i`
+#' is an index identifying which constraint is represented, `j` is an index
+#' identifying which element of the vector `x` is represented, and `nzcc` is the
+#' value of the nonzero constraint coefficient.
+#'
+#' The data value in `xmat` multiplied by the initial weight determines how much
+#' a constraint will change with a unit change in `x`, the ratio of the new
+#' weight to the initial weight. For example, suppose household number 7 has
+#' income of $10,000 then. Suppose that this household is in row 7 of `xmat` and
+#' that column 3 of `xmat` corresponds to income. If this household has an
+#' initial weight of 20, then the constraint coefficient for this cell - how
+#' much changing the `x` value for this household will change the constraint for
+#' total income - is 200,000 (20 x 100,000). The constraints coefficient data
+#' frame will have a row where `i` (the index for the constraint, not the household)
+#' is 3, `j` (the index for the household) is 7, and `nzcc` is 200000.
+#'
+#' @param xmat Numeric matrix of unweighted data values in dense
+#'   form where each row is a household, each column corresponds to a
+#'   constraint, and each cell is a data value.
+#' @param target_names Character vector with names for each constraint. One element per
+#' column in `xmat`.
+#' @param iweights Numeric vector of initial weights in the microdata file, one per row in `xmat`.
+#'
+#' @returns A data frame representing a sparse matrix of constraint
+#'   coefficients, with columns:
+#'   \describe{
+#'   \item{i}{the constraint number}
+#'   \item{j}{an index into x}
+#'   \item{cname}{constraint name, from `target_names`}
+#'   \item{nzcc}{the nonzero constraint coefficient - the initial weight
+#'   multiplied by value}
+#'   \item{iweight}{initial weight for this cell}
+#'   \item{value}{data value}
+#'   }
+#'
 #' @export
 get_cc_sparse <- function(xmat, target_names, iweights) {
   #.. dense matrix of constraint coefficients for the nation
@@ -404,21 +449,33 @@ get_cc_sparse <- function(xmat, target_names, iweights) {
     dplyr::mutate(nzcc = .data$iweight * .data$value) %>%
     dplyr::filter(.data$nzcc != 0) %>%
     dplyr::mutate(i=match(.data$cname, target_names)) %>%
-    dplyr::select(.data$i, .data$j, .data$cname, .data$nzcc, .data$iweight, .data$value) %>%
+    dplyr::select(.data$i, .data$j, .data$cname, .data$nzcc,
+                  .data$iweight, .data$value) %>%
     dplyr::arrange(.data$i, .data$j) # this ordering is crucial for the Jacobian
 
   return(cc_sparse)
 }
 
-# Get inputs
-# # @keyword internal
+#' Create List of Inputs for Optimization Functions.
+#'
+#' Most users will never use this function. Can be useful for debugging.
+#'
+#' @param iweights Numeric vector of initial weights in the microdata file.
+#' @param targets Numeric vector of targets.
+#' @param target_names Character vector of names for targets.
+#' @param tol Numeric vector of tolerances, one per target.
+#' @param cc_sparse Data frame with nonzero constraint coefficients in sparse format.
+#' @param xlb Numeric vector of lower bounds for the `x` vector.
+#' @param xub Numeric vector of upper bounds for the `x` vector.
+#'
 #' @export
 get_inputs <- function(iweights,
                        targets,
                        target_names,
                        tol,
                        cc_sparse,
-                       xlb, xub){
+                       xlb,
+                       xub){
 
   inputs <- list()
   inputs$iweight <- iweights

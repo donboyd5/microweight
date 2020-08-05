@@ -51,8 +51,10 @@ A list with the following elements:
 \describe{
 \item{solver_message}{The message produced by IPOPT. See
 \href{https://coin-or.github.io/Ipopt/OUTPUT.html}{IPOPT output}.}
-\item{etime}{Elapsed time.} \item{objective}{The objective function value at
-the solution.} \item{weights}{Numeric vector of new weights.}
+\item{etime}{Elapsed time.}
+\item{objective}{The objective function value at
+the solution.}
+\item{weights}{Numeric vector of new weights.}
 \item{targets_df}{Data frame with target names and values, values at the
 starting point, values at the solution, tolerances, differences, and percent
 differences. The suffix diff indicates the difference from a target and the
@@ -180,7 +182,10 @@ res2 <- reweight(iweights = iweights, targets = targets,
                 target_names = target_names, tol = tol,
                 xmat = xmat,
                 method="auglag")
-res2
+names(res2)
+res2$solver_message
 res2$etime
+res2$objective
+res2$targets_df
 
 }
