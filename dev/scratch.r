@@ -1,3 +1,63 @@
+
+f <- funtion(ll){
+  args <- as.list(match.call())[-1]
+  print(args)
+}
+
+f <- function(ll){
+  args <- c(as.list(environment()), list(...))
+  print(args)
+}
+
+f <- function(ll){
+  args <- as.list(environment())
+  print(args)
+}
+
+l1 <- list(a=1, b="c")
+l2 <- list(x=3, lz=l1)
+f(l1)
+f(l2)
+
+f <- function(a, b=1, c){
+  args <- as.list(environment())
+  print(args)
+}
+
+f(a=1, c="x")
+f(a=1, c=l1)
+
+
+
+opts <- list(output_file = here::here("test.out"),
+             max_iter = 20)
+
+opts <- list(output_file = here::here("test.out"),
+             file_print_level = 5,
+             max_iter = 20)
+
+opts <- list(file_print_level = 5,
+             max_iter = 20)
+
+opts <- list(output_file = here::here("test.out"),
+             file_print_level = 5,
+             linear_solver = "ma57")
+
+res <- reweight(iweights = iweights,
+                targets = targets,
+                target_names = target_names,
+                tol = tol,
+                xmat = xmat,
+                method = "ipopt",
+                maxiter = 10,
+                optlist = opts)
+
+res$solver_message
+res$objective_unscaled
+res$etime
+names(res$result)
+
+
 library(tidyverse)
 library(microweight)
 library(nloptr)
@@ -928,3 +988,14 @@ df <- tibble(
 df %>%
   transform(y = strsplit(y, ",")) %>%
   unnest(y)
+
+
+f <- function(a, b, c){
+  args <- as.list(match.call())[-1]
+  print(str(args))
+  print(names(args))
+  print(args)
+}
+
+f(6, "cat", 1.3)
+

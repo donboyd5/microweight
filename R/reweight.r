@@ -141,9 +141,15 @@
 #'   select(all_of(target_names)) %>%
 #'   as.matrix
 #'
+#' opts <- list(output_file = "test.out",
+#'              file_print_level = 5,
+#'              linear_solver = "ma57")
+#'
 #' res <- reweight(iweights = iweights, targets = targets,
 #'                 target_names = target_names, tol = tol,
 #'                 xmat = xmat,
+#'                 maxiter = 20,
+#'                 optlist = opts,
 #'                 method = "ipopt")
 #' names(res)
 #' res$solver_message
@@ -179,9 +185,10 @@ reweight <- function(iweights,
   # 'eval_grad_f_xm1sq' 'eval_h_xm1sq' 'eval_jac_g' 'get_cc_sparse'
   # 'get_inputs'
 
+  args <- as.list(environment()) # gets explicit and default arguments
   stopifnot(method %in% c("auglag", "ipopt"))
 
-  check_args(method)
+  check_args(method, args)
 
   t1 <- proc.time()
   cc_sparse <- get_cc_sparse(xmat, target_names, iweights)
@@ -191,31 +198,20 @@ reweight <- function(iweights,
                        cc_sparse,
                        xlb, xub)
 
-  if(method == "auglag"){
-    output <- call_auglag(iweights,
-                          targets,
-                          target_names,
-                          tol,
-                          xmat,
-                          xlb,
-                          xub,
-                          maxiter,
-                          optlist,
-                          quiet,
-                          inputs)
-    } else if(method == "ipopt") {
-      output <- call_ipopt(iweights,
-                           targets,
-                           target_names,
-                           tol,
-                           xmat,
-                           xlb,
-                           xub,
-                           maxiter,
-                           optlist,
-                           quiet,
-                           inputs)
-  }
+  if(method == "auglag") optfn <- call_auglag else
+    if(method == "ipopt") optfn <- call_ipopt
+
+  output <- optfn(iweights,
+                  targets,
+                  target_names,
+                  tol,
+                  xmat,
+                  xlb,
+                  xub,
+                  maxiter,
+                  optlist,
+                  quiet,
+                  inputs)
   t2 <- proc.time()
 
   # define additional values to be returned
@@ -264,20 +260,29 @@ reweight <- function(iweights,
 }
 
 
-check_args <- function(method){
+check_args <- function(method, args){
+  stopifnot(is.matrix(args$xmat),
+            length(args$targets) == length(args$target_names),
+            length(args$targets) == length(args$tol),
+            length(args$targets) == ncol(args$xmat),
+            length(args$iweights) == nrow(args$xmat))
+
   if(method == "auglag"){
-    print("auglag check arguments")
+    # print("auglag check arguments")
+
   } else if(method == "ipopt"){
-  #   if(!is.null(maxiter) & !(is.null(optlist))) {
-  #     print("CAUTION: maxiter and opts both supplied. maxiter will override any iteration limit included in optlist.")
-  #   }
-  #   if(!is.null(optlist)){ # check options list
-  #     if(optlist$file_print_level > 0) {
-  #       stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(optlist$output_file))
-  #     }
-  #   }
-  # }
-    print("ipopt check")
+
+    if(!is.null(args$optlist)){ # check options list
+
+      if(!is.null(args$optlist$file_print_level)) {
+        stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(args$optlist$output_file))
+      }
+
+      if(!is.null(args$maxiter) & !(is.null(args$optlist$max_iter))) {
+        warning("CAUTION: maxiter and optlist$max_iter both supplied. maxiter will be used.")
+      }
+
+    }
   }
 }
 

@@ -168,9 +168,15 @@ xmat <- data_df \%>\%
   select(all_of(target_names)) \%>\%
   as.matrix
 
+opts <- list(output_file = "test.out",
+             file_print_level = 5,
+             linear_solver = "ma57")
+
 res <- reweight(iweights = iweights, targets = targets,
                 target_names = target_names, tol = tol,
                 xmat = xmat,
+                maxiter = 20,
+                optlist = opts,
                 method = "ipopt")
 names(res)
 res$solver_message
