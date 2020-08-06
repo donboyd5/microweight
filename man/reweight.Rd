@@ -103,7 +103,8 @@ res <- reweight(iweights = iweights,
                 target_names = target_names,
                 tol = tol,
                 xmat = xmat,
-                method="ipopt")
+                method="ipopt",
+                quiet = FALSE)
 res$etime
 res$objective_unscaled
 res$targets_df
@@ -113,7 +114,8 @@ res2 <- reweight(iweights = iweights,
                  target_names = target_names,
                  tol = tol,
                  xmat = xmat,
-                 method="auglag")
+                 method="auglag",
+                 quiet = TRUE)
 res2$etime
 res2$objective_unscaled
 res2$targets_df
@@ -181,7 +183,7 @@ res <- reweight(iweights = iweights, targets = targets,
 names(res)
 res$solver_message
 res$etime
-res$objective
+res$objective_unscaled
 res$targets_df
 
 res2 <- reweight(iweights = iweights, targets = targets,
@@ -191,7 +193,7 @@ res2 <- reweight(iweights = iweights, targets = targets,
 names(res2)
 res2$solver_message
 res2$etime
-res2$objective
+res2$objective_unscaled
 res2$targets_df
 
 }

@@ -18,9 +18,11 @@
 #'   initial weights. Default is 0.
 #' @param xub Numeric vector of upper bounds for the ration of new weights to
 #'   initial weights. Default is 50.
-#' @param maxiter Integer value for maximum number of iterations. Default is 50.
-#' @param optlist Named list of allowable
-#'   \href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options}.
+#' @param maxiter Integer value for maximum number of iterations for ipopt;
+#'   maxeval for nlopt. Default is 50.
+#' @param optlist Named list of allowable options:
+#'   \href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options}
+#'   run `nloptr::nloptr.print.options()` for `nloptr` options.
 #' @param method "auglag" (default) or "ipopt" (requires installation of ipoptr)
 #' @param quiet TRUE (default) or FALSE
 #'
@@ -75,7 +77,8 @@
 #'                 target_names = target_names,
 #'                 tol = tol,
 #'                 xmat = xmat,
-#'                 method="ipopt")
+#'                 method="ipopt",
+#'                 quiet = FALSE)
 #' res$etime
 #' res$objective_unscaled
 #' res$targets_df
@@ -85,7 +88,8 @@
 #'                  target_names = target_names,
 #'                  tol = tol,
 #'                  xmat = xmat,
-#'                  method="auglag")
+#'                  method="auglag",
+#'                  quiet = TRUE)
 #' res2$etime
 #' res2$objective_unscaled
 #' res2$targets_df
@@ -150,21 +154,26 @@
 #'                 xmat = xmat,
 #'                 maxiter = 20,
 #'                 optlist = opts,
-#'                 method = "ipopt")
+#'                 method = "ipopt",
+#'                 quiet = FALSE)
 #' names(res)
 #' res$solver_message
 #' res$etime
-#' res$objective
+#' res$objective_unscaled
 #' res$targets_df
 #'
-#' res2 <- reweight(iweights = iweights, targets = targets,
-#'                 target_names = target_names, tol = tol,
-#'                 xmat = xmat,
-#'                 method="auglag")
+#' res2 <- reweight(iweights = iweights,
+#'                  targets = targets,
+#'                  target_names = target_names,
+#'                  tol = tol,
+#'                  xmat = xmat,
+#'                  method = "auglag",
+#'                  maxiter = 1500,
+#'                  quiet = FALSE)
 #' names(res2)
 #' res2$solver_message
 #' res2$etime
-#' res2$objective
+#' res2$objective_unscaled
 #' res2$targets_df
 #'
 #' @export
@@ -313,6 +322,7 @@ call_ipopt <- function(iweights,
   # update default list just defined with any options specified in
   opts <- purrr::list_modify(opts, !!!optlist)
   if(!is.null(maxiter)) opts$max_iter <- maxiter # give priority to directly passed maxiter
+  if(!quiet) opts$print_level <- 5
 
   result <- ipoptr::ipoptr(x0 = inputs$x0,
                            lb = inputs$xlb,
@@ -371,21 +381,26 @@ call_auglag <- function(iweights,
   inputs$jac_heq <- jac[inputs$i_heq, ]
   inputs$jac_hin <- rbind(-jac[inputs$i_hin, ], jac[inputs$i_hin, ])
 
-  local_opts <- list()
-  local_opts$algorithm <- "NLOPT_LD_LBFGS"
-  local_opts$xtol_rel <- 1.0e-4
+  # define auglag options
+  local_opts <- list(algorithm = "NLOPT_LD_LBFGS",
+                     xtol_rel = 1.0e-4)
 
-  opts <- list()
-  opts$algorithm <- "NLOPT_LD_AUGLAG"
-  opts$ftol_rel <- 1.0e-4
-  opts$maxeval <-  5000
-  opts$print_level <- 0
-  opts$local_opts <- local_opts
+  opts <- list(algorithm = "NLOPT_LD_AUGLAG",
+               ftol_rel = 1.0e-4,
+               maxeval =  5000,
+               print_level = 0,
+               local_opts = local_opts)
+
+  # update default list just defined with any options specified in
+  opts <- purrr::list_modify(opts, !!!optlist)
+  if(!is.null(maxiter)) opts$maxeval <- maxiter # give priority to directly passed maxiter
+  if(!quiet) opts$print_level <- 1
 
   result <- nloptr::nloptr(x0=inputs$x0,
                 eval_f=eval_f_xm1sq,
                 eval_grad_f = eval_grad_f_xm1sq,
-                lb = inputs$xlb, ub = inputs$xub,
+                lb = inputs$xlb,
+                ub = inputs$xub,
                 eval_g_ineq = hin_fn,
                 eval_jac_g_ineq = hin.jac_fn,
                 eval_g_eq = heq_fn,
