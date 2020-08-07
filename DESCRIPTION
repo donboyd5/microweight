@@ -29,4 +29,7 @@ Depends:
     R (>= 2.10)
 Roxygen: list(markdown = TRUE)
 Suggests: 
-    ipoptr
+    ipoptr,
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr

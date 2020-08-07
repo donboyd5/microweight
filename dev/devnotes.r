@@ -123,6 +123,13 @@ lintr::lint_package()
 # This will also install all suggested packages.
 
 
+usethis::use_vignette("Reweighting")
+
+# usethis::use_vignette("Geographic weighting")
+
+# usethis::use_vignette("Reweighting")
+
+
 
 
 

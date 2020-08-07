@@ -36,10 +36,12 @@ initial weights. Default is 0.}
 \item{xub}{Numeric vector of upper bounds for the ration of new weights to
 initial weights. Default is 50.}
 
-\item{maxiter}{Integer value for maximum number of iterations. Default is 50.}
+\item{maxiter}{Integer value for maximum number of iterations for ipopt;
+maxeval for nlopt. Default is 50.}
 
-\item{optlist}{Named list of allowable
-\href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options}.}
+\item{optlist}{Named list of allowable options:
+\href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options}
+run \code{nloptr::nloptr.print.options()} for \code{nloptr} options.}
 
 \item{method}{"auglag" (default) or "ipopt" (requires installation of ipoptr)}
 
@@ -179,17 +181,22 @@ res <- reweight(iweights = iweights, targets = targets,
                 xmat = xmat,
                 maxiter = 20,
                 optlist = opts,
-                method = "ipopt")
+                method = "ipopt",
+                quiet = FALSE)
 names(res)
 res$solver_message
 res$etime
 res$objective_unscaled
 res$targets_df
 
-res2 <- reweight(iweights = iweights, targets = targets,
-                target_names = target_names, tol = tol,
-                xmat = xmat,
-                method="auglag")
+res2 <- reweight(iweights = iweights,
+                 targets = targets,
+                 target_names = target_names,
+                 tol = tol,
+                 xmat = xmat,
+                 method = "auglag",
+                 maxiter = 1500,
+                 quiet = FALSE)
 names(res2)
 res2$solver_message
 res2$etime

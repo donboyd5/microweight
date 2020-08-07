@@ -1,0 +1,139 @@
+---
+title: "Reweighting with `reweight`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{reweighting}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+
+options(tibble.print_min = 4L, tibble.print_max = 4L)
+```
+
+```{r setup, include = FALSE}
+library(microweight)
+library(tidyverse)
+library(knitr)
+```
+
+
+"Reweighting" is the process of adjusting the weights on a microdata file so that the file, with new weights, better represents the population of interest.
+
+The function `reweight` creates these new weights.
+
+## Setting up our data
+
+In this vignette we'll use small microdata files extracted from the American Community Survey in the United States: `acs` (10,000 individuals) and `acsbig` (100,000 individuals).
+
+To keep things simple, we create a minimal subset with only these columns:
+
+Column        | Description
+------------- | -------------
+pwgtp         | person weight
+agep          | person's age
+mar           | marital status (1=married, 2=single, ...)
+pincp         | personal income, total
+wagp          | wage income
+ssp           | Social Security income
+
+The first few records have a lot of zeros so we'll look at the tail, which is more representative of typical records:
+
+```{r}
+acs2 <- acs %>%
+  select(pwgtp, agep, mar, pincp, wagp, ssp)
+tail(acs2)
+```
+
+Look at weighted totals for a few variables:
+```{r}
+totals <- acs2 %>%
+  summarise(across(c(pincp, wagp, ssp), ~sum(. * pwgtp)))
+totals
+```
+
+## A simple reweighting problem
+
+Suppose that we have other information, perhaps for a later year, and that we want the following targets:
+
+Column        |   Current value  | Targeted value
+------------- | -----------------|----------------
+pincp         |    7,990,814,687 |    8,000,000,000
+wagp          |    6,070,651,037 |    6,020,123,456
+ssp           |      546,119,219 |      550,100,000
+
+We want new weights that will hit these targets. To do that we must define the following:
+
+Item          |   Description
+------------- | -------------
+iweights      | vector of initial weights, here pwgtp
+target_names  | vector of names of the target variables
+targets       | vector of values for the targets
+tol           | vector of tolerances around the target values
+xmat          | matrix with values
+
+### Set up the problem
+
+Let's define the first four, as they are easy to understand:
+```{r}
+iweights <- acs2$pwgtp
+target_names <- c("pincp", "wagp", "ssp")
+targets <- c(8e9, 6020123456, 550.1e6)
+tol <- c(100, 100, 100)
+```
+
+
+`xmat` is simply a matrix of values:
+```{r}
+xmat <- acs2 %>%
+  select(all_of(target_names)) %>%
+  as.matrix()
+```
+
+
+### Solve the problem
+Now we are ready to reweight:
+```{r}
+result <- reweight(iweights, targets, target_names, tol, xmat)
+```
+
+### Examine results
+How did it work and how long did it take (in seconds)?
+
+```{r}
+result$solver_message
+result$etime
+```
+
+How do the targeted values compare to the original values? `reweight` returns a list with target_df that includes the following information:
+
+
+Item            |   Description
+--------------- | -------------
+targnum         | target number
+targname        | target name
+target          | targeted value
+targinit	      | value for the target using initial weights
+targcalc        | value calculated with new weights
+targinit_diff	  | difference between target and initial value
+targtol	        | tolerance allowed around the target
+targcalc_diff	  | difference between calculated value with new weights and target
+targinit_pdiff	| percent difference between target and initial value
+targtol_pdiff	  | percent difference allowed, based upon tolerances
+targcalc_pdiff  | percent difference between calculated value and target
+
+
+```{r}
+result$targets_df %>%
+  kable(digits=c(rep(0, 8), 2, 2, 2),
+        format.args=list(big.mark = ","))
+```
+
+Note that the actual difference between the target for `wagp` (wages) was $104 even though we set a tolerance of $100. That is because the optimizer that chooses new weights (in this case) has its own set of tolerances. Those can be changed by passing options to the solver, but we won't do that in this vignette.
+
+

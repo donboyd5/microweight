@@ -393,7 +393,7 @@ call_auglag <- function(iweights,
 
   # update default list just defined with any options specified in
   opts <- purrr::list_modify(opts, !!!optlist)
-  if(!is.null(maxiter)) opts$maxeval <- maxiter # give priority to directly passed maxiter
+  if(!is.null(opts$maxiter)) opts$maxeval <- maxiter # give priority to directly passed maxiter
   if(!quiet) opts$print_level <- 1
 
   result <- nloptr::nloptr(x0=inputs$x0,
