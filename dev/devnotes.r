@@ -131,5 +131,13 @@ usethis::use_vignette("Reweighting")
 
 
 
+# manual ----
+devtools::build_manual(pkg = ".", path = NULL)
+
+
+# CRAN policies ----
+# https://cran.r-project.org/web/packages/policies.html
+# CRAN submission
+# https://cran.r-project.org/web/packages/submission_checklist.html
 
 

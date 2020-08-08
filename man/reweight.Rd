@@ -172,9 +172,15 @@ xmat <- data_df \%>\%
   select(all_of(target_names)) \%>\%
   as.matrix
 
-opts <- list(output_file = "test.out",
+# You can write ipopt output to a text file and even monitor results of a
+# long-running optimization by opening the file with a text editor, as long
+# as the editor does not lock the file for writing. Normally you would specify
+# the path to the output file in a location on your system but for this example
+# we'll use a temporary file, which we'll call tfile.
+tfile <- tempfile("tfile",fileext=".txt")
+opts <- list(output_file = tfile,
              file_print_level = 5,
-             linear_solver = "ma57")
+             linear_solver = "mumps")
 
 res <- reweight(iweights = iweights, targets = targets,
                 target_names = target_names, tol = tol,
@@ -182,12 +188,17 @@ res <- reweight(iweights = iweights, targets = targets,
                 maxiter = 20,
                 optlist = opts,
                 method = "ipopt",
-                quiet = FALSE)
+                quiet = TRUE) # we'll write progress to tfile so quiet is nice
 names(res)
 res$solver_message
 res$etime
 res$objective_unscaled
 res$targets_df
+
+# Normally you would examine the optimization output file in a text editor
+# For this example, we display it in the console:
+writeLines(readLines(tfile))
+unlink(tfile) # delete the temporary file in this example
 
 res2 <- reweight(iweights = iweights,
                  targets = targets,

@@ -2,12 +2,15 @@ Package: microweight
 Type: Package
 Title: Tools for Weighting Microdata Files
 Version: 0.1.0
-Author: person("Don", "Boyd", , "donboyd5@gmail.com", role = c("aut", "cre"))
-Maintainer: Don Boyd <donboyd5@gmail.com>
+Authors@R: 
+    person(given = "Don",
+           family = "Boyd",
+             role = c("aut", "cre"),
+             email = "donboyd5@gmail.com")
 Description: Tools for (1) splitting record weights for a microdata file across 
     states or other geographies in a manner that hits or comes close to targets 
     for those geographies, (2) for reweighting microdata files, and (3) for 
-    other weighting tasks.
+    selected other weighting tasks.
 License: GPL-3
 Encoding: UTF-8
 LazyData: true

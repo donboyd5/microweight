@@ -1,0 +1,140 @@
+---
+title: "Constructing geographic weighs with `geoweight`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{geoweighting}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+
+options(tibble.print_min = 4L, tibble.print_max = 4L)
+```
+
+```{r setup, include = FALSE}
+library(microweight)
+library(tidyverse)
+library(knitr)
+```
+
+
+Economists, policy analysts, and others often need to take a sample for one geographic area, such as for the nation, and construct weights that will make the sample consistent with known data for a different geographic area, such as a state.
+
+The function `geoweight` creates these new weights.
+
+## Setting up our data
+
+In this vignette we'll use small microdata files extracted from the American Community Survey in the United States: `acs` (10,000 individuals) and `acsbig` (100,000 individuals).
+
+To keep things simple, we create a minimal subset with only these columns:
+
+Column        | Description
+------------- | -------------
+stabbr        | state postal abbreviation
+pwgtp         | person weight
+agep          | person's age
+mar           | marital status (1=married, 2=single, ...)
+pincp         | personal income, total
+wagp          | wage income
+ssp           | Social Security income
+
+The first few records have a lot of zeros so we'll look at the tail, which is more representative of typical records:
+
+```{r}
+acs2 <- acs %>%
+  select(stabbr, pwgtp, agep, mar, pincp, wagp, ssp)
+tail(acs2)
+```
+
+Look at targets for a few variables:
+```{r}
+totals <- acs2 %>%
+  group_by(stabbr) %>%
+  summarise(across(c(pincp, wagp, ssp), ~sum(. * pwgtp)), .groups = "drop")
+# totals
+
+set.seed(1234)
+targets_df <- totals %>%
+  mutate(across(c(pincp, wagp, ssp), ~ . * (1 + rnorm(n=1, 0, .02))))
+targets_df
+
+targets_df <- totals
+
+
+```
+
+## A simple geographic weighting problem
+
+We want weights that will hit these targets. To do that we must define the following inputs for geoweight. We will use default values for other arguments:
+
+Item          |   Description
+------------- | -------------
+wh            | vector of household total weights, length h (see h, s, k definitions below)
+xmat          | h x k matrix of data for households
+targets       | s x k matrix of desired target values
+
+Where `h`, `s`, and `k` are defined as follows: 
+
+Index         |   Description
+------------- | -------------
+h             | number of households (or individuals, records, tax returns, etc.)
+s             | number of states (or other geographies or subgroups)
+k             | number of characteristics each household has
+
+
+### Set up the problem
+
+Let's define the first four, as they are easy to understand:
+```{r}
+wh <- acs2$pwgtp
+
+target_names <- c("pincp", "wagp", "ssp")
+xmat <- acs2 %>%
+  select(all_of(target_names)) %>%
+  as.matrix
+
+targets <- targets_df %>%
+  select(all_of(target_names)) %>%
+  as.matrix
+
+
+#' p <- make_problem(h=10, s=3, k=2)
+#' dw <- get_dweights(p$targets)
+#'
+#' res1 <- geoweight(wh = p$wh, xmat = p$xmat, targets = p$targets,
+#'   dweights = dw, quiet=TRUE)
+#'
+```
+
+### Solve the problem
+Now we are ready to reweight:
+```{r}
+result <- geoweight(wh, xmat, targets)
+# result <- geoweight(wh, xmat, targets, method='Newton')
+```
+
+### Examine results
+Look at important summary measures:
+
+```{r}
+names(result)
+result$solver_message
+result$etime
+result$sse_unweighted
+result$sse_weighted
+
+```
+
+How do the targeted values compare to the original values? `geoweight` returns a matrix with percent differences:
+
+
+```{r}
+result$targets_pctdiff %>% round(2)
+```
+
+Surprisingly (perhaps), the percentage differences are not all zero.
