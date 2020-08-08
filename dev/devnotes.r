@@ -123,13 +123,18 @@ lintr::lint_package()
 # This will also install all suggested packages.
 
 
-usethis::use_vignette("Reweighting")
+# Do NOT RERUN the lines below as they will write over old vignette files - use
+# ONLY to create initial vignette
+# usethis::use_vignette("reweighting")
+# usethis::use_vignette("geoweighting")
 
-# usethis::use_vignette("Geographic weighting")
 
-# usethis::use_vignette("Reweighting")
+# devtools::build() will create package here:
+# "C:/RPrograms PC/Packages/microweight_0.1.0.tar.gz"
 
-
+# install with:
+#  install.packages("C:/RPrograms PC/Packages/microweight_0.1.0.tar.gz", repos = NULL, type="source", dependencies = TRUE)
+browseVignettes(package = "microweight")
 
 # manual ----
 devtools::build_manual(pkg = ".", path = NULL)

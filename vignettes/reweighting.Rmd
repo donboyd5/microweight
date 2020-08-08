@@ -136,4 +136,3 @@ result$targets_df %>%
 
 Note that the actual difference between the target for `wagp` (wages) was $104 even though we set a tolerance of $100. That is because the optimizer that chooses new weights (in this case) has its own set of tolerances. Those can be changed by passing options to the solver, but we won't do that in this vignette.
 
-
