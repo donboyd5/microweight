@@ -131,13 +131,18 @@ lintr::lint_package()
 
 # devtools::build() will create package here:
 # "C:/RPrograms PC/Packages/microweight_0.1.0.tar.gz"
+devtools::build()
 
 # install with:
-#  install.packages("C:/RPrograms PC/Packages/microweight_0.1.0.tar.gz", repos = NULL, type="source", dependencies = TRUE)
+install.packages("C:/RPrograms PC/Packages/microweight_0.1.0.tar.gz", repos = NULL, type="source", dependencies = TRUE)
 browseVignettes(package = "microweight")
 
 # manual ----
 devtools::build_manual(pkg = ".", path = NULL)
+
+# build package ----
+usethis::use_build_ignore("data-raw")
+usethis::use_build_ignore("dev")
 
 
 # CRAN policies ----

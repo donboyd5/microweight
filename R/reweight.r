@@ -8,23 +8,28 @@
 #' how much the new weights differ from an initial set of weights is minimized.
 #'
 #'
-#' @param iweights Numeric vector of initial household weights, length h.
-#' @param targets Numeric vector of desired target values, length k.
-#' @param target_names Character vector of names for targets, length k.
-#' @param tol Numeric vector of additive tolerances for targets, length k. The
-#'   solver will seek to hit the targets, plus or minus tol.
-#' @param xmat Matrix of data for households, dimension h x k.
-#' @param xlb Numeric vector of lower bounds for the ratio of new weights to
-#'   initial weights. Default is 0.
-#' @param xub Numeric vector of upper bounds for the ration of new weights to
-#'   initial weights. Default is 50.
+#' @param iweights Initial household weights, numeric vector length h.
+#' @param xmat Data for households. Matrix with 1 row per household and 1 column
+#'   per characteristic (h x k matrix). Columns can be named.
+#' @param targets Targeted values, 1 per characteristic. Numeric vector length
+#'   k. Can be a named vector. If named, names must match those of `xmat`.
+#' @param tol Additive tolerances for targets, 1 per characteristic. Numeric
+#'   vector length k. The solver will seek to hit the targets, plus or minus
+#'   tol.
+#' @param xlb Lower bounds for the ratio of new weights to initial weights. Can
+#'   be a vector of 1 weight per household or a scalar that will be used for all
+#'   households. Default is 0.
+#' @param xub Upper bounds for the ratio of new weights to initial weights. Can
+#'   be a vector of 1 weight per household or a scalar that will be used for all
+#'   households. Default is 50.
 #' @param maxiter Integer value for maximum number of iterations for ipopt;
 #'   maxeval for nlopt. Default is 50.
 #' @param optlist Named list of allowable options:
-#'   \href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options}
-#'   run `nloptr::nloptr.print.options()` for `nloptr` options.
-#' @param method "auglag" (default) or "ipopt" (requires installation of ipoptr)
-#' @param quiet TRUE (default) or FALSE
+#'   \href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options} run
+#'   `nloptr::nloptr.print.options()` for `nloptr` options.
+#' @param method =c("auglag", "ipopt"). auglag is default. ipopt requires
+#'   installation of `ipoptr`, which can be difficult. See details.
+#' @param quiet TRUE (default) or FALSE.
 #'
 #' @returns A list with the following elements:
 #'
@@ -53,51 +58,9 @@
 #' distortion measures.
 #'
 #' @examples
-#' # Example 1: Determine new weights for a simple problem with random data
-#' p <- make_problem(h=30, s=1, k=4)
-#' # we'll have 30 households (30 weights) and 4 targets
-#'
-#' # break out needed components and prepare them for reweight
-#' iweights <- p$wh
-#'
-#' targets <- as.vector(p$targets)
-#' target_names <- paste0("targ", 1:length(targets))
-#' # the targets created by make_problem are hit exactly when using the initial
-#' # weights so perturb them slightly so that we have to find new weights
-#' set.seed(1234)
-#' noise <- rnorm(n=length(targets), mean = 0, sd = .02)
-#' targets <- targets * (1 + noise)
-#'
-#' tol <- .005 * abs(targets)
-#' xmat <- p$xmat
-#' colnames(xmat) <- target_names
-#'
-#' res <- reweight(iweights = iweights,
-#'                 targets = targets,
-#'                 target_names = target_names,
-#'                 tol = tol,
-#'                 xmat = xmat,
-#'                 method="ipopt",
-#'                 quiet = FALSE)
-#' res$etime
-#' res$objective_unscaled
-#' res$targets_df
-#'
-#' res2 <- reweight(iweights = iweights,
-#'                  targets = targets,
-#'                  target_names = target_names,
-#'                  tol = tol,
-#'                  xmat = xmat,
-#'                  method="auglag",
-#'                  quiet = TRUE)
-#' res2$etime
-#' res2$objective_unscaled
-#' res2$targets_df
-#'
-#' # Example 2: Determine new weights for a small problem using ACS data
+#' # Determine new weights for a small problem using ACS data
 #' library(tidyverse)
-#' data(acsbig)
-#' data(acs_targets)
+#' data(acs)
 
 #' # let's focus on income group 5 and create and then try to hit targets for:
 #' #    number of records (nrecs -- to be created based on the weight, pwgtp)
@@ -113,18 +76,20 @@
 #' # defines whether it is true for that record
 #'
 #' # get the data and prepare it
-#' data_df <- acsbig %>%
+#' data_df <- acs %>%
 #'   filter(incgroup == 5) %>%
 #'   select(pwgtp, pincp, wagp, ssip) %>%
 #'   # create the indicator variables
 #'   mutate(nrecs = 1, # indicator used for number of records
 #'          wagp_nnz = (wagp != 0) * 1.,
 #'          ssip_nnz = (ssip != 0) * 1.)
-#' data_df # 10,000 records
+#' data_df # 1,000 records
+#'
+#' iweights <- data_df$pwgtp # initial weights
 #'
 #' # prepare targets: in practice we would get them from an external source but
 #' # in this case we'll get actual sums on the file and perturb them randomly
-#' # so that targets differ from initial sums
+#' # so that we will need new weights to hit these targets.
 #' set.seed(1234)
 #' targets_df <- data_df %>%
 #'   pivot_longer(-pwgtp) %>%
@@ -135,64 +100,72 @@
 #' # in practice we'd make sure that targets make sense (e.g., not negative)
 #' targets_df
 #'
-#' iweights <- data_df$pwgtp
 #' targets <- targets_df$target
-#' target_names <- targets_df$name
+#' names(targets) <- targets_df$name
+#' targets
 #'
 #' tol <- .005 * abs(targets) # use 0.5% as our tolerance
+#'
+#' # Prepare the matrix of characteristics of each household. These characteristics must correspond to the targets. Columns must
+#' # either be in the same order as the targets, or must have the same names.
 #' xmat <- data_df %>%
 #'   # important that columns be in the same order as the targets
-#'   select(all_of(target_names)) %>%
+#'   select(all_of(names(targets))) %>%
 #'   as.matrix
+#'
+#' res <- reweight(iweights = iweights,
+#'                  xmat = xmat,
+#'                  targets = targets,
+#'                  tol = tol)
+#' names(res)
+#' res$etime
+#' res$objective_unscaled
+#' res$targets_df
+#' quantile(res$weights)
+#' quantile(iweights)
+#' quantile(res$weights / iweights)
+#'
+#'#' \dontrun{
+#' # This example is not run because it uses `ipoptr`, which is not a
+#' # requirement for `microweight`.
 #'
 #' # You can write ipopt output to a text file and even monitor results of a
 #' # long-running optimization by opening the file with a text editor, as long
 #' # as the editor does not lock the file for writing. Normally you would specify
-#' # the path to the output file in a location on your system but for this example
-#' # we'll use a temporary file, which we'll call tfile.
+#' # the path to the output file in a location on your system but for this
+#' # example we'll use a temporary file, which we'll call tfile.
+#'
 #' tfile <- tempfile("tfile",fileext=".txt")
+#'
 #' opts <- list(output_file = tfile,
 #'              file_print_level = 5,
-#'              linear_solver = "mumps")
+#'              linear_solver = "ma27")
 #'
-#' res <- reweight(iweights = iweights, targets = targets,
-#'                 target_names = target_names, tol = tol,
+#' res2 <- reweight(iweights = iweights,
 #'                 xmat = xmat,
+#'                 targets = targets,
+#'                 tol = tol,
 #'                 maxiter = 20,
 #'                 optlist = opts,
 #'                 method = "ipopt",
 #'                 quiet = TRUE) # we'll write progress to tfile so quiet is nice
-#' names(res)
-#' res$solver_message
-#' res$etime
-#' res$objective_unscaled
-#' res$targets_df
-#'
-#' # Normally you would examine the optimization output file in a text editor
-#' # For this example, we display it in the console:
-#' writeLines(readLines(tfile))
-#' unlink(tfile) # delete the temporary file in this example
-#'
-#' res2 <- reweight(iweights = iweights,
-#'                  targets = targets,
-#'                  target_names = target_names,
-#'                  tol = tol,
-#'                  xmat = xmat,
-#'                  method = "auglag",
-#'                  maxiter = 1500,
-#'                  quiet = FALSE)
 #' names(res2)
 #' res2$solver_message
 #' res2$etime
 #' res2$objective_unscaled
 #' res2$targets_df
 #'
+#' # Normally you would examine the optimization output file in a text editor
+#' # For this example, we display it in the console:
+#' writeLines(readLines(tfile))
+#' unlink(tfile) # delete the temporary file in this example
+#' } # end dontrun
+#'
 #' @export
 reweight <- function(iweights,
-                     targets,
-                     target_names,
-                     tol,
                      xmat,
+                     targets,
+                     tol,
                      xlb=0,
                      xub=50,
                      maxiter = 50,
@@ -200,15 +173,11 @@ reweight <- function(iweights,
                      method = "auglag",
                      quiet = TRUE){
 
-  # document these:
-  # 'define_jac_g_structure_sparse' 'eval_f_xm1sq' 'eval_g'
-  # 'eval_grad_f_xm1sq' 'eval_h_xm1sq' 'eval_jac_g' 'get_cc_sparse'
-  # 'get_inputs'
-
   args <- as.list(environment()) # gets explicit and default arguments
   stopifnot(method %in% c("auglag", "ipopt"))
 
   check_args(method, args)
+  target_names <- names(targets)
 
   t1 <- proc.time()
   cc_sparse <- get_cc_sparse(xmat, target_names, iweights)
@@ -282,7 +251,6 @@ reweight <- function(iweights,
 
 check_args <- function(method, args){
   stopifnot(is.matrix(args$xmat),
-            length(args$targets) == length(args$target_names),
             length(args$targets) == length(args$tol),
             length(args$targets) == ncol(args$xmat),
             length(args$iweights) == nrow(args$xmat))
@@ -304,6 +272,74 @@ check_args <- function(method, args){
 
     }
   }
+}
+
+call_auglag <- function(iweights,
+                        targets,
+                        target_names,
+                        tol,
+                        xmat,
+                        xlb,
+                        xub,
+                        maxiter,
+                        optlist,
+                        quiet,
+                        inputs){
+  # check inputs
+
+  # add inputs needed for auglag
+  inputs$objscale <- length(iweights)
+  inputs$gscale <- targets / 10
+  # inputs$objscale <- 1
+  # inputs$gscale <- rep(1, length(targets))
+
+  jac <- matrix(0, nrow=inputs$n_constraints, ncol=inputs$n_variables)
+  f <- function(i){
+    rep(i, length(inputs$eval_jac_g_structure[[i]]))
+  }
+  iidx <- lapply(1:length(inputs$eval_jac_g_structure), f) %>% unlist
+  jidx <- unlist(inputs$eval_jac_g_structure)
+  indexes <- cbind(iidx, jidx)
+  jac[indexes] <- inputs$cc_sparse$nzcc
+
+  jac_scaled <- sweep(jac, MARGIN=1, FUN="/", STATS=inputs$gscale)
+  jac <- jac_scaled
+
+  inputs$jac_heq <- jac[inputs$i_heq, ]
+  inputs$jac_hin <- rbind(-jac[inputs$i_hin, ], jac[inputs$i_hin, ])
+
+  # define auglag options
+  local_opts <- list(algorithm = "NLOPT_LD_LBFGS",
+                     xtol_rel = 1.0e-4)
+
+  opts <- list(algorithm = "NLOPT_LD_AUGLAG",
+               ftol_rel = 1.0e-4,
+               maxeval =  5000,
+               print_level = 0,
+               local_opts = local_opts)
+
+  # update default list just defined with any options specified in
+  opts <- purrr::list_modify(opts, !!!optlist)
+  if(!is.null(opts$maxiter)) opts$maxeval <- maxiter # give priority to directly passed maxiter
+  if(!quiet) opts$print_level <- 1
+
+  result <- nloptr::nloptr(x0 = inputs$x0,
+                           eval_f = eval_f_xm1sq,
+                           eval_grad_f = eval_grad_f_xm1sq,
+                           lb = inputs$xlb,
+                           ub = inputs$xub,
+                           eval_g_ineq = hin_fn,
+                           eval_jac_g_ineq = hin.jac_fn,
+                           eval_g_eq = heq_fn,
+                           eval_jac_g_eq = heq.jac_fn,
+                           opts = opts,
+                           inputs = inputs)
+
+  output <- list()
+  output$inputs <- inputs
+  output$opts <- opts
+  output$result <- result
+  output
 }
 
 
@@ -358,73 +394,7 @@ call_ipopt <- function(iweights,
 }
 
 
-call_auglag <- function(iweights,
-                        targets,
-                        target_names,
-                        tol,
-                        xmat,
-                        xlb,
-                        xub,
-                        maxiter,
-                        optlist,
-                        quiet,
-                        inputs){
-  # check inputs
 
-  # add inputs needed for auglag
-  inputs$objscale <- length(iweights)
-  inputs$gscale <- targets / 10
-  # inputs$objscale <- 1
-  # inputs$gscale <- rep(1, length(targets))
-
-  jac <- matrix(0, nrow=inputs$n_constraints, ncol=inputs$n_variables)
-  f <- function(i){
-    rep(i, length(inputs$eval_jac_g_structure[[i]]))
-  }
-  iidx <- lapply(1:length(inputs$eval_jac_g_structure), f) %>% unlist
-  jidx <- unlist(inputs$eval_jac_g_structure)
-  indexes <- cbind(iidx, jidx)
-  jac[indexes] <- inputs$cc_sparse$nzcc
-
-  jac_scaled <- sweep(jac, MARGIN=1, FUN="/", STATS=inputs$gscale)
-  jac <- jac_scaled
-
-  inputs$jac_heq <- jac[inputs$i_heq, ]
-  inputs$jac_hin <- rbind(-jac[inputs$i_hin, ], jac[inputs$i_hin, ])
-
-  # define auglag options
-  local_opts <- list(algorithm = "NLOPT_LD_LBFGS",
-                     xtol_rel = 1.0e-4)
-
-  opts <- list(algorithm = "NLOPT_LD_AUGLAG",
-               ftol_rel = 1.0e-4,
-               maxeval =  5000,
-               print_level = 0,
-               local_opts = local_opts)
-
-  # update default list just defined with any options specified in
-  opts <- purrr::list_modify(opts, !!!optlist)
-  if(!is.null(opts$maxiter)) opts$maxeval <- maxiter # give priority to directly passed maxiter
-  if(!quiet) opts$print_level <- 1
-
-  result <- nloptr::nloptr(x0=inputs$x0,
-                eval_f=eval_f_xm1sq,
-                eval_grad_f = eval_grad_f_xm1sq,
-                lb = inputs$xlb,
-                ub = inputs$xub,
-                eval_g_ineq = hin_fn,
-                eval_jac_g_ineq = hin.jac_fn,
-                eval_g_eq = heq_fn,
-                eval_jac_g_eq = heq.jac_fn,
-                opts = opts,
-                inputs = inputs)
-
-  output <- list()
-  output$inputs <- inputs
-  output$opts <- opts
-  output$result <- result
-  output
-}
 
 
 #' Create Sparse Constraints Coefficients Data Frame.

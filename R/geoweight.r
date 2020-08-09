@@ -16,10 +16,13 @@
 #' iterations will be faster.
 #'
 #'
-#' @param wh vector of household total weights, length h (see h, s, k definitions below)
-#' @param xmat h x k matrix of data for households
-#' @param targets s x k matrix of desired target values
-#' @param dweights optional vector of weighting factors for targets, length s * k
+#' @param wh Household weights, 1 per household, numeric vector length h. Each
+#'   household's geography weights must sum to its household weight.
+#' @param xmat Data for households. Matrix with 1 row per household and 1 column
+#'   per characteristic (h x k matrix). Columns can be named.
+#' @param targets Targeted values. Matrix with 1 row per geographic area and 1
+#'   column per characteristic. If columns are named, names must match column names of `xmat`.
+#' @param dweights Difference weights: weights to be applied to Weighting factors for targets (h x k matrix).
 #' @param method optional parameter for approach to use; must be one of
 #' c('LM', 'Broyden', 'Newton'); default is 'LM'
 #' @param betavec optional vector of initial guess at parameters, length s * k;
