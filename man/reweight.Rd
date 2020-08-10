@@ -11,42 +11,44 @@ reweight(
   tol,
   xlb = 0,
   xub = 50,
-  maxiter = 50,
-  optlist = NULL,
   method = "auglag",
+  optlist = NULL,
   quiet = TRUE
 )
 }
 \arguments{
-\item{iweights}{Initial household weights, numeric vector length h.}
+\item{iweights}{Initial weights, 1 per household, numeric vector length h.}
 
 \item{xmat}{Data for households. Matrix with 1 row per household and 1 column
-per characteristic (h x k matrix). Columns can be named.}
+per target (h x k matrix). Columns must be named. Each cell is the amount
+that a household, when weighted, will add to the corresponding target. For
+example, if the column corresponds to the target for total income, the cell
+value would be the income for the household. If the column corresponds to
+the target for number of married households, then the cell value would be 1
+if the household is married, and 0 otherwise.}
 
-\item{targets}{Targeted values, 1 per characteristic. Numeric vector length
-k. Can be a named vector. If named, names must match those of \code{xmat}.}
+\item{targets}{Named numeric vector of length k. Each element must correspond
+to a column of \code{xmat}.}
 
-\item{tol}{Additive tolerances for targets, 1 per characteristic. Numeric
-vector length k. The solver will seek to hit the targets, plus or minus
-tol.}
+\item{tol}{Additive tolerances, 1 per target. Numeric vector length k.
+\code{reweight} will seek to hit the targets, plus or minus tol.}
 
-\item{xlb}{Lower bounds for the ratio of new weights to initial weights. Can
-be a vector of 1 weight per household or a scalar that will be used for all
-households. Default is 0.}
+\item{xlb}{Lower bounds for the ratio of new weights to initial weights.
+Either a vector of 1 value per household or a scalar that will be used for
+all households. Default is 0.}
 
-\item{xub}{Upper bounds for the ratio of new weights to initial weights. Can
-be a vector of 1 weight per household or a scalar that will be used for all
-households. Default is 50.}
-
-\item{maxiter}{Integer value for maximum number of iterations for ipopt;
-maxeval for nlopt. Default is 50.}
-
-\item{optlist}{Named list of allowable options:
-\href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options} run
-\code{nloptr::nloptr.print.options()} for \code{nloptr} options.}
+\item{xub}{Upper bounds for the ratio of new weights to initial weights.
+Either a vector of 1 value per household or a scalar that will be used for
+all households. Default is 50.}
 
 \item{method}{=c("auglag", "ipopt"). auglag is default. ipopt requires
 installation of \code{ipoptr}, which can be difficult. See details.}
+
+\item{optlist}{Named list of allowable options:
+If method = "auglag" (default) @seealso \code{\link[nloptr:nloptr]{nloptr::nloptr()}} or run
+\code{nloptr::nloptr.print.options()} for all \code{nloptr} options.
+If method = "ipopt" @seealso \code{\link[ipoptr:ipoptr]{ipoptr::ipoptr()}} and see
+\href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options} .}
 
 \item{quiet}{TRUE (default) or FALSE.}
 }
@@ -57,8 +59,7 @@ A list with the following elements:
 \item{solver_message}{The message produced by IPOPT. See
 \href{https://coin-or.github.io/Ipopt/OUTPUT.html}{IPOPT output}.}
 \item{etime}{Elapsed time.}
-\item{objective}{The objective function value at
-the solution.}
+\item{objective}{The objective function value at the solution.}
 \item{weights}{Numeric vector of new weights.}
 \item{targets_df}{Data frame with target names and values, values at the
 starting point, values at the solution, tolerances, differences, and percent
@@ -74,20 +75,32 @@ or come close to desired targets, and (2) a measure of distortion based on
 how much the new weights differ from an initial set of weights is minimized.
 }
 \details{
-\code{reweight} uses the \href{https://coin-or.github.io/Ipopt/}{IPOPT
-solver} in the package \code{\link[ipoptr]{ipoptr}}. The problem is set up as
-a nonlinear program with constraints. The constraints are the desired
-targets. The user can set tolerances around these targets in which case they
-are inequality constraints. By default the distortion measure to be minimized
-is the sum of squared differences between the ratio of each new weight to the
-corresponding initial weight and 1. The user can provide alternative
-distortion measures.
+\code{reweight} constructs a nonlinear program from the provided inputs. It
+minimizes a distortion function that is based upon how much weights change
+from the initial weights, while seeking to satisfy constraints that are the
+targets +/- tolerances. The default distortion function is given below, where
+\code{w_i} is an initial weight and \code{w_n} is a new weight:
+
+\deqn{\sum w_i * (w_n / w_i - 1)^2}
+
+Thus, we minimize the sum of differences between the ratio of each new weight
+and its corresponding initial weight and 1, with each term weighted by the
+initial weight. Future versions will allow alternative distortion functions.
+
+The default is to use an augmented lagrangian approach
+implemented with the \code{nloptr} function in the \code{nloptr} package, using the
+L-BFGS algorithm. This usually works well on reasonably sized problems but
+may have difficulty with very large or very difficult problems.
+
+If you have \code{\link[ipoptr]{ipoptr}} installed, which uses the
+\href{https://coin-or.github.io/Ipopt/}{IPOPT solver}, you will be able to
+solve much larger problems much more quickly by specifying method = "ipopt"
+in the \code{reweight} call.
 }
 \examples{
-# Example 2: Determine new weights for a small problem using ACS data
+# Determine new weights for a small problem using ACS data
 library(tidyverse)
 data(acs)
-data(acs_targets)
 # let's focus on income group 5 and create and then try to hit targets for:
 #    number of records (nrecs -- to be created based on the weight, pwgtp)
 #    personal income (pincp)
@@ -132,30 +145,36 @@ targets
 
 tol <- .005 * abs(targets) # use 0.5\% as our tolerance
 
-# Prepare the matrix of characteristics of each household. These characteristics must correspond to the targets. Columns must
-# either be in the same order as the targets, or must have the same names.
-xmat <- data_df \%>\%
-  # important that columns be in the same order as the targets
-  select(all_of(names(targets))) \%>\%
-  as.matrix
+# Prepare the matrix of characteristics of each household. These
+# characteristics must correspond to the targets. Columns must # either be in
+# the same order as the targets, or must have the same names.
+xmat <- data_df \%>\% # important that columns be in the same order as the targets
+  select(all_of(names(targets))) \%>\% as.matrix
 
 res <- reweight(iweights = iweights,
-                 xmat = xmat,
-                 targets = targets,
-                 tol = tol)
+                xmat = xmat,
+                targets = targets,
+                tol = tol)
+names(res)
 res$etime
 res$objective_unscaled
 res$targets_df
+quantile(res$weights)
+quantile(iweights)
+quantile(res$weights / iweights)
 
 #' \dontrun{
-# This example is not run because it uses `ipoptr`, which is not a requirement for `microweight`.
+# This example is not run because it uses `ipoptr`, which is not a
+# requirement for `microweight`.
 
 # You can write ipopt output to a text file and even monitor results of a
 # long-running optimization by opening the file with a text editor, as long
 # as the editor does not lock the file for writing. Normally you would specify
-# the path to the output file in a location on your system but for this example
-# we'll use a temporary file, which we'll call tfile.
+# the path to the output file in a location on your system but for this
+# example we'll use a temporary file, which we'll call tfile.
+
 tfile <- tempfile("tfile",fileext=".txt")
+
 opts <- list(output_file = tfile,
              file_print_level = 5,
              linear_solver = "ma27")
@@ -164,10 +183,9 @@ res2 <- reweight(iweights = iweights,
                 xmat = xmat,
                 targets = targets,
                 tol = tol,
-                maxiter = 20,
-                optlist = opts,
                 method = "ipopt",
-                quiet = TRUE) # we'll write progress to tfile so quiet is nice
+                optlist = opts,
+                quiet = TRUE) # write progress to tfile, not console
 names(res2)
 res2$solver_message
 res2$etime
@@ -178,6 +196,6 @@ res2$targets_df
 # For this example, we display it in the console:
 writeLines(readLines(tfile))
 unlink(tfile) # delete the temporary file in this example
-}
+} # end dontrun
 
 }

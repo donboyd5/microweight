@@ -1,34 +1,35 @@
 #' Reweight a microdata file.
 #'
-# This is a comment. It will not show in the documentation.
-#'
 #' Calculate new weights for each household in a microdata file
 #' so that (1) selected variables, weighted with the new weights and summed, hit
 #' or come close to desired targets, and (2) a measure of distortion based on
 #' how much the new weights differ from an initial set of weights is minimized.
 #'
-#'
-#' @param iweights Initial household weights, numeric vector length h.
+#' @param iweights Initial weights, 1 per household, numeric vector length h.
 #' @param xmat Data for households. Matrix with 1 row per household and 1 column
-#'   per characteristic (h x k matrix). Columns can be named.
-#' @param targets Targeted values, 1 per characteristic. Numeric vector length
-#'   k. Can be a named vector. If named, names must match those of `xmat`.
-#' @param tol Additive tolerances for targets, 1 per characteristic. Numeric
-#'   vector length k. The solver will seek to hit the targets, plus or minus
-#'   tol.
-#' @param xlb Lower bounds for the ratio of new weights to initial weights. Can
-#'   be a vector of 1 weight per household or a scalar that will be used for all
-#'   households. Default is 0.
-#' @param xub Upper bounds for the ratio of new weights to initial weights. Can
-#'   be a vector of 1 weight per household or a scalar that will be used for all
-#'   households. Default is 50.
-#' @param maxiter Integer value for maximum number of iterations for ipopt;
-#'   maxeval for nlopt. Default is 50.
-#' @param optlist Named list of allowable options:
-#'   \href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options} run
-#'   `nloptr::nloptr.print.options()` for `nloptr` options.
+#'   per target (h x k matrix). Columns must be named. Each cell is the amount
+#'   that a household, when weighted, will add to the corresponding target. For
+#'   example, if the column corresponds to the target for total income, the cell
+#'   value would be the income for the household. If the column corresponds to
+#'   the target for number of married households, then the cell value would be 1
+#'   if the household is married, and 0 otherwise.
+#' @param targets Named numeric vector of length k. Each element must correspond
+#'   to a column of `xmat`.
+#' @param tol Additive tolerances, 1 per target. Numeric vector length k.
+#'   `reweight` will seek to hit the targets, plus or minus tol.
+#' @param xlb Lower bounds for the ratio of new weights to initial weights.
+#'   Either a vector of 1 value per household or a scalar that will be used for
+#'   all households. Default is 0.
+#' @param xub Upper bounds for the ratio of new weights to initial weights.
+#'   Either a vector of 1 value per household or a scalar that will be used for
+#'   all households. Default is 50.
 #' @param method =c("auglag", "ipopt"). auglag is default. ipopt requires
 #'   installation of `ipoptr`, which can be difficult. See details.
+#' @param optlist Named list of allowable options:
+#'   If method = "auglag" (default) @seealso [nloptr::nloptr()] or run
+#'   `nloptr::nloptr.print.options()` for all `nloptr` options.
+#'   If method = "ipopt" @seealso [ipoptr::ipoptr()] and see
+#'   \href{https://coin-or.github.io/Ipopt/OPTIONS.html}{IPOPT options} .
 #' @param quiet TRUE (default) or FALSE.
 #'
 #' @returns A list with the following elements:
@@ -37,8 +38,7 @@
 #' \item{solver_message}{The message produced by IPOPT. See
 #' \href{https://coin-or.github.io/Ipopt/OUTPUT.html}{IPOPT output}.}
 #' \item{etime}{Elapsed time.}
-#'  \item{objective}{The objective function value at
-#' the solution.}
+#' \item{objective}{The objective function value at the solution.}
 #' \item{weights}{Numeric vector of new weights.}
 #' \item{targets_df}{Data frame with target names and values, values at the
 #' starting point, values at the solution, tolerances, differences, and percent
@@ -48,14 +48,27 @@
 #' }
 #'
 #' @details
-#' \code{reweight} uses the \href{https://coin-or.github.io/Ipopt/}{IPOPT
-#' solver} in the package \code{\link[ipoptr]{ipoptr}}. The problem is set up as
-#' a nonlinear program with constraints. The constraints are the desired
-#' targets. The user can set tolerances around these targets in which case they
-#' are inequality constraints. By default the distortion measure to be minimized
-#' is the sum of squared differences between the ratio of each new weight to the
-#' corresponding initial weight and 1. The user can provide alternative
-#' distortion measures.
+#' `reweight` constructs a nonlinear program from the provided inputs. It
+#' minimizes a distortion function that is based upon how much weights change
+#' from the initial weights, while seeking to satisfy constraints that are the
+#' targets +/- tolerances. The default distortion function is given below, where
+#' `w_i` is an initial weight and `w_n` is a new weight:
+#'
+#' \deqn{\sum w_i * (w_n / w_i - 1)^2}
+#'
+#' Thus, we minimize the sum of differences between the ratio of each new weight
+#' and its corresponding initial weight and 1, with each term weighted by the
+#' initial weight. Future versions will allow alternative distortion functions.
+#'
+#' The default is to use an augmented lagrangian approach
+#' implemented with the `nloptr` function in the `nloptr` package, using the
+#' L-BFGS algorithm. This usually works well on reasonably sized problems but
+#' may have difficulty with very large or very difficult problems.
+#'
+#' If you have \code{\link[ipoptr]{ipoptr}} installed, which uses the
+#' \href{https://coin-or.github.io/Ipopt/}{IPOPT solver}, you will be able to
+#' solve much larger problems much more quickly by specifying method = "ipopt"
+#' in the `reweight` call.
 #'
 #' @examples
 #' # Determine new weights for a small problem using ACS data
@@ -106,17 +119,16 @@
 #'
 #' tol <- .005 * abs(targets) # use 0.5% as our tolerance
 #'
-#' # Prepare the matrix of characteristics of each household. These characteristics must correspond to the targets. Columns must
-#' # either be in the same order as the targets, or must have the same names.
-#' xmat <- data_df %>%
-#'   # important that columns be in the same order as the targets
-#'   select(all_of(names(targets))) %>%
-#'   as.matrix
+#' # Prepare the matrix of characteristics of each household. These
+#' # characteristics must correspond to the targets. Columns must # either be in
+#' # the same order as the targets, or must have the same names.
+#' xmat <- data_df %>% # important that columns be in the same order as the targets
+#'   select(all_of(names(targets))) %>% as.matrix
 #'
 #' res <- reweight(iweights = iweights,
-#'                  xmat = xmat,
-#'                  targets = targets,
-#'                  tol = tol)
+#'                 xmat = xmat,
+#'                 targets = targets,
+#'                 tol = tol)
 #' names(res)
 #' res$etime
 #' res$objective_unscaled
@@ -145,10 +157,9 @@
 #'                 xmat = xmat,
 #'                 targets = targets,
 #'                 tol = tol,
-#'                 maxiter = 20,
-#'                 optlist = opts,
 #'                 method = "ipopt",
-#'                 quiet = TRUE) # we'll write progress to tfile so quiet is nice
+#'                 optlist = opts,
+#'                 quiet = TRUE) # write progress to tfile, not console
 #' names(res2)
 #' res2$solver_message
 #' res2$etime
@@ -168,9 +179,8 @@ reweight <- function(iweights,
                      tol,
                      xlb=0,
                      xub=50,
-                     maxiter = 50,
-                     optlist = NULL,
                      method = "auglag",
+                     optlist = NULL,
                      quiet = TRUE){
 
   args <- as.list(environment()) # gets explicit and default arguments
@@ -197,7 +207,6 @@ reweight <- function(iweights,
                   xmat,
                   xlb,
                   xub,
-                  maxiter,
                   optlist,
                   quiet,
                   inputs)
@@ -266,10 +275,6 @@ check_args <- function(method, args){
         stopifnot("valid output_file name needed if file_print_level > 0" = !is.null(args$optlist$output_file))
       }
 
-      if(!is.null(args$maxiter) & !(is.null(args$optlist$max_iter))) {
-        warning("CAUTION: maxiter and optlist$max_iter both supplied. maxiter will be used.")
-      }
-
     }
   }
 }
@@ -281,7 +286,6 @@ call_auglag <- function(iweights,
                         xmat,
                         xlb,
                         xub,
-                        maxiter,
                         optlist,
                         quiet,
                         inputs){
@@ -350,25 +354,22 @@ call_ipopt <- function(iweights,
                        xmat,
                        xlb,
                        xub,
-                       maxiter,
                        optlist,
                        quiet,
                        inputs){
   # check inputs
 
-  # define ipopt options
+  # define defaults for ipopt options
   opts <- list(print_level = 0,
                file_print_level = 0, # integer
-               max_iter= maxiter,
+               max_iter= 50,
                linear_solver = "ma27", # mumps pardiso ma27 ma57 ma77 ma86 ma97
                jac_c_constant = "yes", # does not improve on moderate problems equality constraints
                jac_d_constant = "yes", # does not improve on  moderate problems inequality constraints
                hessian_constant = "yes") # KEEP default NO - if yes Ipopt asks for Hessian of Lagrangian function only once and reuses; default "no"
-  # output_file = NULL)
 
   # update default list just defined with any options specified in
   opts <- purrr::list_modify(opts, !!!optlist)
-  if(!is.null(maxiter)) opts$max_iter <- maxiter # give priority to directly passed maxiter
   if(!quiet) opts$print_level <- 5
 
   result <- ipoptr::ipoptr(x0 = inputs$x0,
@@ -392,8 +393,6 @@ call_ipopt <- function(iweights,
   output$result <- result
   output
 }
-
-
 
 
 

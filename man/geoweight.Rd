@@ -21,10 +21,10 @@ geoweight(
 household's geography weights must sum to its household weight.}
 
 \item{xmat}{Data for households. Matrix with 1 row per household and 1 column
-per characteristic (h x k matrix).}
+per characteristic (h x k matrix). Columns can be named.}
 
 \item{targets}{Targeted values. Matrix with 1 row per geographic area and 1
-column per characteristic.}
+column per characteristic. If columns are named, names must match column names of \code{xmat}.}
 
 \item{dweights}{Difference weights: weights to be applied to Weighting factors for targets (h x k matrix).}
 

@@ -1,4 +1,9 @@
+#' microweight
+#'
 #' @description
-#' To learn more about dplyr, start with the vignettes:
+#' To learn more about `microweight`, start with the vignettes:
 #' `browseVignettes(package = "microweight")`
-"_PACKAGE"
+#'
+#' @docType package
+#' @name microweight
+NULL
