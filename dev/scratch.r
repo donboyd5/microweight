@@ -1,43 +1,56 @@
 
-f <- funtion(ll){
-  args <- as.list(match.call())[-1]
-  print(args)
-}
+# Determine new weights for a small problem using ACS data
+library(tidyverse)
+data(acs)
 
-f <- function(ll){
-  args <- c(as.list(environment()), list(...))
-  print(args)
-}
+data_df <- acs %>%
+  filter(incgroup == 5) %>%
+  select(stabbr, pwgtp, pincp, wagp, ssip) %>%
+  # create the indicator variables
+  mutate(nrecs = 1, # indicator used for number of records
+         wagp_nnz = (wagp != 0) * 1.,
+         ssip_nnz = (ssip != 0) * 1.)
+data_df # 1,000 records
 
-f <- function(ll){
-  args <- as.list(environment())
-  print(args)
-}
+wh <- data_df$pwgtp
 
-l1 <- list(a=1, b="c")
-l2 <- list(x=3, lz=l1)
-f(l1)
-f(l2)
+set.seed(1234)
+targets_df <- data_df %>%
+  pivot_longer(-c(pwgtp, stabbr)) %>%
+  mutate(wtd_value = value * pwgtp) %>%
+  group_by(stabbr, name) %>%
+  summarise(wtd_value = sum(wtd_value), .groups = "drop") %>%
+  mutate(wtd_value = wtd_value * (1 + rnorm(length(.), mean=0, sd=.01))) %>%
+  pivot_wider(values_from = wtd_value)
+targets_df
 
-f <- function(a, b=1, c){
-  args <- as.list(environment())
-  print(args)
-}
+targets <- targets_df %>%
+  select(-stabbr) %>%
+  as.matrix
+rownames(targets) <- targets_df$stabbr
+targets
 
-f(a=1, c="x")
-f(a=1, c=l1)
+xmat <- data_df %>%
+  select(all_of(colnames(targets))) %>%
+  as.matrix
+xmat
 
+opts_LM <- list(ptol = 1e-16, ftol = 1e-16)
+resx <- geoweight(wh = wh, xmat = xmat, targets = targets, optlist = opts_LM, quiet = FALSE)
+resx$solver_message
 
+names(resx)
+resx$h; resx$s; resx$k
+resx$method
+resx$solver_message
+resx$etime
+resx$sse_unweighted
+resx$sse_weighted
+resx$targets
+resx$targets_calc
+resx$targets_diff %>% round(1)
+resx$targets_pctdiff %>% round(1)
 
-opts <- list(output_file = here::here("test.out"),
-             max_iter = 20)
-
-opts <- list(output_file = here::here("test.out"),
-             file_print_level = 5,
-             max_iter = 20)
-
-opts <- list(file_print_level = 5,
-             max_iter = 20)
 
 opts <- list(output_file = here::here("test.out"),
              file_print_level = 5,

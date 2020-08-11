@@ -21,15 +21,23 @@
 #' @param xmat Data for households. Matrix with 1 row per household and 1 column
 #'   per characteristic (h x k matrix). Columns can be named.
 #' @param targets Targeted values. Matrix with 1 row per geographic area and 1
-#'   column per characteristic. If columns are named, names must match column names of `xmat`.
-#' @param dweights Difference weights: weights to be applied to Weighting factors for targets (h x k matrix).
-#' @param method optional parameter for approach to use; must be one of
-#' c('LM', 'Broyden', 'Newton'); default is 'LM'
+#'   column per characteristic. If columns are named, names must match column
+#'   names of `xmat`. Rownames can be used to identify geographic areas. If
+#'   unnamed, rows will be named geo1, geo2, ..., geo_s
+#' @param dweights Difference weights: weights to be applied to Weighting
+#'   factors for targets (h x k matrix).
 #' @param betavec optional vector of initial guess at parameters, length s * k;
 #'   default is zero for all
-#' @param maxiter integer; defaults: Broyden (2000), Newton (200), LM (200)
-#' @param opts list of options that will update nelsqv or nls.lm options respectively
-#' @param quiet c(TRUE, FALSE) FALSE is default; TRUE provides newlsqv or nls.lm output
+#' @param method optional parameter for approach to use; must be one of c('LM',
+#'   'Broyden', 'Newton'); default is 'LM'
+#' @param maxiter maximum number of iterations; integer; defaults vary by method:
+#'   LM (default):        200
+#'   Broyden:            2000
+#'   Newton:              200
+#' @param optlist list of options that will update nelsqv or nls.lm options
+#'   respectively
+#' @param quiet c(TRUE, FALSE) FALSE is default; TRUE provides newlsqv or nls.lm
+#'   output
 #'
 #' @returns A list with the following elements:
 #' \describe{
@@ -52,13 +60,13 @@
 #' dw <- get_dweights(p$targets)
 #'
 #' res1 <- geoweight(wh = p$wh, xmat = p$xmat, targets = p$targets,
-#'   dweights = dw, quiet=TRUE)
+#'   dweights = dw)
 #'
 #' res2 <- geoweight(wh = p$wh, xmat = p$xmat, targets = p$targets,
-#'   dweights = dw, method = 'Newton', quiet=TRUE)
+#'   dweights = dw, method = 'Newton')
 #'
 #' res3 <- geoweight(wh = p$wh, xmat = p$xmat, targets = p$targets,
-#'   dweights = dw, method = 'LM', quiet=TRUE)
+#'   dweights = dw, method = 'Broyden')
 #'
 #' res1
 #' res2
@@ -66,12 +74,21 @@
 #' c(res1$sse_unweighted, res2$sse_unweighted, res3$sse_unweighted)
 #'
 #' # verify that the state weights produce the desired targets
-#' t(res2$whs) %*% p$xmat
+#' t(res1$whs) %*% p$xmat
 #' p$targets
 #' @export
-geoweight <- function(wh, xmat, targets, dweights = get_dweights(targets),
-                      method = 'LM', betavec = rep(0, length(targets)),
-                      maxiter = NULL, opts = NULL, quiet = FALSE){
+geoweight <- function(wh,
+                      xmat,
+                      targets,
+                      dweights = get_dweights(targets),
+                      betavec = rep(0, length(targets)),
+                      method = 'LM',
+                      maxiter = NULL,
+                      optlist = NULL,
+                      quiet = TRUE){
+
+  args <- as.list(environment()) # gets explicit and default arguments
+  stopifnot(method %in% c('LM', 'Broyden', 'Newton'))
 
   # dweights will be set so that targets are normalized to 100, unless alternative
   #   difference weights are supplied
@@ -79,8 +96,8 @@ geoweight <- function(wh, xmat, targets, dweights = get_dweights(targets),
   # Global choices under the Newton and Broyden methods:
   # c("dbldog", "pwldog", "cline", "qline", "gline", "hook", "none")
 
-  if(!is.null(maxiter) & !(is.null(opts))) {
-    print("CAUTION: maxiter and opts both supplied. maxiter will override any iteration limit included in opts.")
+  if(!is.null(maxiter) & !(is.null(optlist))) {
+    print("CAUTION: maxiter and optlist both supplied. maxiter will override any iteration limit included in optlist")
   }
 
   opts_LM <- minpack.lm::nls.lm.control(maxiter = 200,
@@ -113,7 +130,7 @@ geoweight <- function(wh, xmat, targets, dweights = get_dweights(targets),
 
   t1 <- proc.time()
   if (method == "LM") {
-    opts_LM <- purrr::list_modify(opts_LM, !!!opts) # splice lists
+    opts_LM <- purrr::list_modify(opts_LM, !!!optlist) # splice lists
     if(!is.null(maxiter)) opts_LM$maxiter <- maxiter
     output <- minpack.lm::nls.lm(par = betavec,
                                  fn = diff_vec,
@@ -123,7 +140,7 @@ geoweight <- function(wh, xmat, targets, dweights = get_dweights(targets),
     beta_opt <- output$par
     opts_used <- opts_LM
   } else if (method == "Broyden") {
-    opts_Broyden <- purrr::list_modify(opts_Broyden, !!!opts) # splice lists
+    opts_Broyden <- purrr::list_modify(opts_Broyden, !!!optlist) # splice lists
     if(!is.null(maxiter)) opts_Broyden$maxit <- maxiter
     output <- nleqslv::nleqslv(x = betavec, fn = diff_vec, jac = NULL,
                                wh = wh, xmat = xmat, targets = targets,
@@ -136,9 +153,8 @@ geoweight <- function(wh, xmat, targets, dweights = get_dweights(targets),
     opts_used <- opts_Broyden
 
     } else if (method == "Newton") {
-      opts_Newton <- purrr::list_modify(opts_Newton, !!!opts) # splice lists
+      opts_Newton <- purrr::list_modify(opts_Newton, !!!optlist) # splice lists
       if(!is.null(maxiter)) opts_Newton$maxit <- maxiter
-      print("calling...")
       output <- nleqslv::nleqslv(x = betavec, fn = diff_vec, jac = NULL,
                                  wh = wh, xmat = xmat, targets = targets,
                                  dweights = dweights,

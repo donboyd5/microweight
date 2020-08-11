@@ -179,12 +179,12 @@ reweight <- function(iweights,
                      tol,
                      xlb=0,
                      xub=50,
-                     method = "auglag",
+                     method = 'auglag',
                      optlist = NULL,
                      quiet = TRUE){
 
   args <- as.list(environment()) # gets explicit and default arguments
-  stopifnot(method %in% c("auglag", "ipopt"))
+  stopifnot(method %in% c('auglag', 'ipopt'))
 
   check_args(method, args)
   target_names <- names(targets)

@@ -9,11 +9,11 @@ geoweight(
   xmat,
   targets,
   dweights = get_dweights(targets),
-  method = "LM",
   betavec = rep(0, length(targets)),
+  method = "LM",
   maxiter = NULL,
-  opts = NULL,
-  quiet = FALSE
+  optlist = NULL,
+  quiet = TRUE
 )
 }
 \arguments{
@@ -24,21 +24,29 @@ household's geography weights must sum to its household weight.}
 per characteristic (h x k matrix). Columns can be named.}
 
 \item{targets}{Targeted values. Matrix with 1 row per geographic area and 1
-column per characteristic. If columns are named, names must match column names of \code{xmat}.}
+column per characteristic. If columns are named, names must match column
+names of \code{xmat}. Rownames can be used to identify geographic areas. If
+unnamed, rows will be named geo1, geo2, ..., geo_s}
 
-\item{dweights}{Difference weights: weights to be applied to Weighting factors for targets (h x k matrix).}
-
-\item{method}{optional parameter for approach to use; must be one of
-c('LM', 'Broyden', 'Newton'); default is 'LM'}
+\item{dweights}{Difference weights: weights to be applied to Weighting
+factors for targets (h x k matrix).}
 
 \item{betavec}{optional vector of initial guess at parameters, length s * k;
 default is zero for all}
 
-\item{maxiter}{integer; defaults: Broyden (2000), Newton (200), LM (200)}
+\item{method}{optional parameter for approach to use; must be one of c('LM',
+'Broyden', 'Newton'); default is 'LM'}
 
-\item{opts}{list of options that will update nelsqv or nls.lm options respectively}
+\item{maxiter}{maximum number of iterations; integer; defaults vary by method:
+LM (default):        200
+Broyden:            2000
+Newton:              200}
 
-\item{quiet}{c(TRUE, FALSE) FALSE is default; TRUE provides newlsqv or nls.lm output}
+\item{optlist}{list of options that will update nelsqv or nls.lm options
+respectively}
+
+\item{quiet}{c(TRUE, FALSE) FALSE is default; TRUE provides newlsqv or nls.lm
+output}
 }
 \value{
 A list with the following elements:
@@ -80,13 +88,13 @@ p <- make_problem(h=10, s=3, k=2)
 dw <- get_dweights(p$targets)
 
 res1 <- geoweight(wh = p$wh, xmat = p$xmat, targets = p$targets,
-  dweights = dw, quiet=TRUE)
+  dweights = dw)
 
 res2 <- geoweight(wh = p$wh, xmat = p$xmat, targets = p$targets,
-  dweights = dw, method = 'Newton', quiet=TRUE)
+  dweights = dw, method = 'Newton')
 
 res3 <- geoweight(wh = p$wh, xmat = p$xmat, targets = p$targets,
-  dweights = dw, method = 'LM', quiet=TRUE)
+  dweights = dw, method = 'Broyden')
 
 res1
 res2
