@@ -1,5 +1,6 @@
 
 # Determine new weights for a small problem using ACS data
+library(microweight)
 library(tidyverse)
 data(acs)
 
@@ -37,12 +38,10 @@ xmat
 
 opts_LM <- list(ptol = 1e-16, ftol = 1e-16)
 resx <- geoweight(wh = wh, xmat = xmat, targets = targets, optlist = opts_LM, quiet = FALSE)
-resx$solver_message
-
 names(resx)
+resx$solver_message
 resx$h; resx$s; resx$k
 resx$method
-resx$solver_message
 resx$etime
 resx$sse_unweighted
 resx$sse_weighted
@@ -50,6 +49,10 @@ resx$targets
 resx$targets_calc
 resx$targets_diff %>% round(1)
 resx$targets_pctdiff %>% round(1)
+
+
+
+
 
 
 opts <- list(output_file = here::here("test.out"),

@@ -1,4 +1,4 @@
-#' Split weights across geographies
+#' #' Split weights across geographies
 #'
 #' \code{geoweight} calculates state weights for each household in a microdata
 #' file that add up to the household total weight, such that weighted state
@@ -76,6 +76,96 @@
 #' # verify that the state weights produce the desired targets
 #' t(res1$whs) %*% p$xmat
 #' p$targets
+#'
+#' # Example 2: Determine state weights for a problem using ACS data
+#' # In this case, we actually know a set of weights that work (because they
+#' # are in the ACS) but we want to see if we can construct state weights
+#' # as if we did not know the true weights.
+#' library(tidyverse)
+#' data(acs)
+#' glimpse(acs)
+#'
+#' # create a subset that has just one income group (incgroup ==5), with
+#' # variables we want to target, including indicator variables where we want
+#' # to target the weighted number of records for which a particular variable
+#' data_df <- acs %>%
+#'   filter(incgroup == 5) %>%
+#'   select(stabbr, pwgtp, pincp, wagp, ssip) %>%
+#'   # create the indicator variables
+#'   mutate(nrecs = 1, # indicator used for number of records
+#'          wagp_nnz = (wagp != 0) * 1.,
+#'          ssip_nnz = (ssip != 0) * 1.)
+#' data_df # 1,000 records
+#'
+#' wh <- data_df$pwgtp
+#'
+#' targets_df <- data_df %>%
+#'   pivot_longer(-c(pwgtp, stabbr)) %>%
+#'   mutate(wtd_value = value * pwgtp) %>%
+#'   group_by(stabbr, name) %>%
+#'   summarise(wtd_value = sum(wtd_value), .groups = "drop") %>%
+#'   pivot_wider(values_from = wtd_value)
+#' targets_df
+#'
+#' targets <- targets_df %>%
+#'   select(-stabbr) %>%
+#'   as.matrix
+#' rownames(targets) <- targets_df$stabbr
+#' targets
+#'
+#' xmat <- data_df %>%
+#'   select(all_of(colnames(targets))) %>%
+#'   as.matrix
+#' xmat
+#'
+#' opts_LM <- list(ptol = 1e-8, ftol = 1e-8)
+#' resx2 <- geoweight(wh = wh, xmat = xmat, targets = targets, optlist = opts_LM, quiet = TRUE)
+#' names(resx2)
+#' resx2$solver_message
+#' resx2$h; resx2$s; resx2$k
+#' resx2$method
+#' resx2$etime
+#' resx2$sse_unweighted
+#' resx2$sse_weighted
+#' resx2$targets
+#' resx2$targets_calc
+#' resx2$targets_diff %>% round(1)
+#' resx2$targets_pctdiff %>% round(1)
+#'
+#' # let's compare the estimated weights to the actual weights, which we know in this case
+#' # (but would not know in a real-world application)
+#' df <- tibble(wh = resx2$wh) %>%
+#'   cbind(resx2$whs) %>%
+#'   mutate(person = row_number()) %>%
+#'   pivot_longer(cols = any_of(state.abb),
+#'                names_to = "stabbr_solved",
+#'                values_to = "weight_solved") %>%
+#'  left_join(data_df %>%
+#'              select(stabbr_true = stabbr, pwgtp) %>%
+#'              mutate(person = row_number()),
+#'              by = "person")
+#'
+#' # Example 3: Repeat the above, but add some random noise to the targets to
+#' # make them harder to hit. Nothing else is changed.
+#'
+#' set.seed(1234)
+#' targetsx3 <- targets * (1 + rnorm(length(targets), mean=0, sd=.01))
+#' targetsx3
+#'
+#' resx3 <- geoweight(wh = wh, xmat = xmat, targets = targetsx3, optlist = opts_LM, quiet = TRUE)
+#' resx3$solver_message
+#' resx3$h; resx3$s; resx3$k
+#' resx3$method
+#' resx3$etime
+#' resx3$sse_unweighted
+#' resx3$sse_weighted
+#' resx3$targets
+#' resx3$targets_calc
+#' resx3$targets_diff %>% round(1)
+#' resx3$targets_pctdiff %>% round(1)
+#'
+#' # Note that this was harder to solve and we do not hit the targets exactly.
+#'
 #' @export
 geoweight <- function(wh,
                       xmat,
